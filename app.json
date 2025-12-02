@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "TrustMatch",
+    "slug": "trustmatch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#DC2626"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.trustmatch.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "TrustMatch needs camera access for identity verification and profile photos.",
+        "NSPhotoLibraryUsageDescription": "TrustMatch needs photo library access for profile photos."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#DC2626"
+      },
+      "package": "com.trustmatch.app",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TrustMatch needs camera access for identity verification."
+        }
+      ]
+    ]
+  }
+}

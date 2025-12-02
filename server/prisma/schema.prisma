@@ -1,0 +1,185 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  phone             String    @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  dateOfBirth       DateTime
+  gender            Gender
+  interestedIn      InterestedIn
+  bio               String?
+  city              String?
+  country           String?
+  latitude          Float?
+  longitude         Float?
+  
+  verification      Verification?
+  deviceFingerprints DeviceFingerprint[]
+  photos            Photo[]
+  sentSwipes        Swipe[]   @relation("SentSwipes")
+  receivedSwipes    Swipe[]   @relation("ReceivedSwipes")
+  matches1          Match[]   @relation("MatchUser1")
+  matches2          Match[]   @relation("MatchUser2")
+  sentMessages      Message[] @relation("SentMessages")
+  
+  ageRangeMin       Int       @default(18)
+  ageRangeMax       Int       @default(50)
+  maxDistance       Int       @default(50)
+  
+  isActive          Boolean   @default(true)
+  lastActive        DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model Verification {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  isVerified      Boolean   @default(false)
+  idVerified      Boolean   @default(false)
+  selfieVerified  Boolean   @default(false)
+  emailVerified   Boolean   @default(false)
+  phoneVerified   Boolean   @default(false)
+  
+  idDocumentType  IDDocumentType?
+  idDocumentUrl   String?
+  selfieUrl       String?
+  faceMatchScore  Float?
+  livenessScore   Float?
+  
+  verifiedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model DeviceFingerprint {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  deviceId        String
+  platform        String
+  osVersion       String?
+  appVersion      String?
+  ipAddress       String?
+  
+  isBlocked       Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  lastUsedAt      DateTime  @default(now())
+  
+  @@unique([deviceId, userId])
+  @@index([deviceId])
+}
+
+model Photo {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  url         String
+  order       Int       @default(0)
+  isMain      Boolean   @default(false)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Swipe {
+  id            String    @id @default(uuid())
+  swiperId      String
+  swiper        User      @relation("SentSwipes", fields: [swiperId], references: [id], onDelete: Cascade)
+  swipedId      String
+  swiped        User      @relation("ReceivedSwipes", fields: [swipedId], references: [id], onDelete: Cascade)
+  
+  action        SwipeAction
+  createdAt     DateTime  @default(now())
+  
+  @@unique([swiperId, swipedId])
+  @@index([swipedId])
+}
+
+model Match {
+  id          String    @id @default(uuid())
+  user1Id     String
+  user1       User      @relation("MatchUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2Id     String
+  user2       User      @relation("MatchUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  
+  messages    Message[]
+  
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  
+  @@unique([user1Id, user2Id])
+}
+
+model Message {
+  id          String    @id @default(uuid())
+  matchId     String
+  match       Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  
+  content     String
+  type        MessageType @default(TEXT)
+  
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+  
+  @@index([matchId])
+}
+
+model BlockedAccount {
+  id              String    @id @default(uuid())
+  email           String?
+  phone           String?
+  deviceId        String?
+  reason          String
+  blockedAt       DateTime  @default(now())
+  
+  @@index([email])
+  @@index([phone])
+  @@index([deviceId])
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum InterestedIn {
+  MALE
+  FEMALE
+  BOTH
+}
+
+enum IDDocumentType {
+  PASSPORT
+  DRIVERS_LICENSE
+  NATIONAL_ID
+}
+
+enum SwipeAction {
+  LIKE
+  DISLIKE
+  SUPERLIKE
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  GIF
+}
