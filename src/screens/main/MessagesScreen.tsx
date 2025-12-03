@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,14 @@ import {
   Image,
   TouchableOpacity,
   TextInput,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { VerifiedBadge } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 
 type MessagesScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -23,10 +25,14 @@ interface Match {
   name: string;
   photo: string;
   isVerified: boolean;
+  trustScore: number;
+  aiModerationEnabled: boolean;
+  safetyLevel: 'high' | 'medium' | 'low';
   lastMessage?: string;
   lastMessageTime?: string;
   unreadCount?: number;
   isOnline?: boolean;
+  isNew?: boolean;
 }
 
 const MOCK_MATCHES: Match[] = [
@@ -35,6 +41,9 @@ const MOCK_MATCHES: Match[] = [
     name: 'Sarah',
     photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100',
     isVerified: true,
+    trustScore: 95,
+    aiModerationEnabled: true,
+    safetyLevel: 'high',
     lastMessage: "Hey! How's your day going? 😊",
     lastMessageTime: '2m ago',
     unreadCount: 2,
@@ -45,6 +54,9 @@ const MOCK_MATCHES: Match[] = [
     name: 'Emily',
     photo: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100',
     isVerified: true,
+    trustScore: 92,
+    aiModerationEnabled: true,
+    safetyLevel: 'high',
     lastMessage: 'That sounds amazing! Would love to go',
     lastMessageTime: '1h ago',
     isOnline: true,
@@ -54,6 +66,9 @@ const MOCK_MATCHES: Match[] = [
     name: 'Jessica',
     photo: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=100',
     isVerified: true,
+    trustScore: 98,
+    aiModerationEnabled: true,
+    safetyLevel: 'high',
     lastMessage: 'See you tomorrow!',
     lastMessageTime: 'Yesterday',
   },
@@ -65,102 +80,216 @@ const NEW_MATCHES: Match[] = [
     name: 'Amanda',
     photo: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100',
     isVerified: true,
+    trustScore: 88,
+    aiModerationEnabled: true,
+    safetyLevel: 'medium',
+    isNew: true,
   },
   {
     id: '5',
     name: 'Rachel',
     photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
     isVerified: true,
+    trustScore: 91,
+    aiModerationEnabled: true,
+    safetyLevel: 'high',
+    isNew: true,
   },
   {
     id: '6',
     name: 'Nicole',
     photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
     isVerified: true,
+    trustScore: 94,
+    aiModerationEnabled: true,
+    safetyLevel: 'high',
+    isNew: true,
   },
 ];
 
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<TextInput>(null);
+  const { normalize: rNormalize } = useResponsive();
 
   const filteredMatches = MOCK_MATCHES.filter(match =>
     match.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const handleSearchSubmit = () => {
+    Keyboard.dismiss();
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    searchInputRef.current?.focus();
+  };
+
+  const newMatchImageSize = normalize(70);
+  const newMatchContainerWidth = normalize(75);
+  const avatarSize = normalize(60);
+  const onlineIndicatorSize = normalize(14);
+
   const renderNewMatch = ({ item }: { item: Match }) => (
     <TouchableOpacity
-      style={styles.newMatchItem}
+      style={[styles.newMatchItem, { width: newMatchContainerWidth, minHeight: MIN_TOUCH_SIZE }]}
       onPress={() => navigation.navigate('Chat', { matchId: item.id, name: item.name })}
+      hitSlop={HIT_SLOP}
+      activeOpacity={0.7}
     >
       <View style={styles.newMatchImageContainer}>
-        <Image source={{ uri: item.photo }} style={styles.newMatchImage} />
+        <Image 
+          source={{ uri: item.photo }} 
+          style={[
+            styles.newMatchImage, 
+            { 
+              width: newMatchImageSize, 
+              height: newMatchImageSize, 
+              borderRadius: newMatchImageSize / 2 
+            }
+          ]} 
+        />
         {item.isVerified && (
           <View style={styles.newMatchBadge}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
+            <Ionicons name="checkmark-circle" size={normalize(16)} color={COLORS.success} />
           </View>
         )}
       </View>
-      <Text style={styles.newMatchName} numberOfLines={1}>{item.name}</Text>
+      <Text style={[styles.newMatchName, { fontSize: normalize(FONTS.sizes.sm) }]} numberOfLines={1}>
+        {item.name}
+      </Text>
     </TouchableOpacity>
   );
 
   const renderConversation = ({ item }: { item: Match }) => (
     <TouchableOpacity
-      style={styles.conversationItem}
+      style={[styles.conversationItem, { minHeight: MIN_TOUCH_SIZE }]}
       onPress={() => navigation.navigate('Chat', { matchId: item.id, name: item.name })}
+      hitSlop={HIT_SLOP}
+      activeOpacity={0.7}
     >
       <View style={styles.avatarContainer}>
-        <Image source={{ uri: item.photo }} style={styles.avatar} />
-        {item.isOnline && <View style={styles.onlineIndicator} />}
+        <Image 
+          source={{ uri: item.photo }} 
+          style={[
+            styles.avatar, 
+            { 
+              width: avatarSize, 
+              height: avatarSize, 
+              borderRadius: avatarSize / 2 
+            }
+          ]} 
+        />
+        {item.isOnline && (
+          <View 
+            style={[
+              styles.onlineIndicator, 
+              { 
+                width: onlineIndicatorSize, 
+                height: onlineIndicatorSize, 
+                borderRadius: onlineIndicatorSize / 2 
+              }
+            ]} 
+          />
+        )}
       </View>
 
       <View style={styles.conversationContent}>
         <View style={styles.conversationHeader}>
           <View style={styles.nameContainer}>
-            <Text style={styles.conversationName}>{item.name}</Text>
+            <Text style={[styles.conversationName, { fontSize: normalize(FONTS.sizes.md) }]}>
+              {item.name}
+            </Text>
             {item.isVerified && <VerifiedBadge isVerified size="small" />}
           </View>
-          <Text style={styles.timeText}>{item.lastMessageTime}</Text>
+          <Text style={[styles.timeText, { fontSize: normalize(FONTS.sizes.xs) }]}>
+            {item.lastMessageTime}
+          </Text>
         </View>
         <View style={styles.messageRow}>
           <Text
             style={[
               styles.lastMessage,
-              item.unreadCount && styles.unreadMessage,
+              { fontSize: normalize(FONTS.sizes.sm) },
+              (item.unreadCount || 0) > 0 ? styles.unreadMessage : null,
             ]}
             numberOfLines={1}
           >
             {item.lastMessage}
           </Text>
-          {item.unreadCount && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadCount}>{item.unreadCount}</Text>
+          {(item.unreadCount || 0) > 0 && (
+            <View style={[styles.unreadBadge, { minWidth: normalize(20), height: normalize(20) }]}>
+              <Text style={[styles.unreadCount, { fontSize: normalize(FONTS.sizes.xs) }]}>
+                {item.unreadCount}
+              </Text>
             </View>
           )}
+          
+          {/* Trust Score Indicator */}
+          <View style={styles.trustIndicator}>
+            <Ionicons name="shield-checkmark" size={12} color={COLORS.trustScore} />
+            <Text style={styles.trustScoreText}>{item.trustScore}%</Text>
+          </View>
+          
+          {/* AI Moderation Status */}
+          {item.aiModerationEnabled && (
+            <View style={styles.aiModerationBadge}>
+              <Ionicons name="chatbubble-ellipses" size={10} color={COLORS.success} />
+            </View>
+          )}
+          
+          {/* Video Call & Audio Indicators */}
+          <View style={styles.communicationIndicators}>
+            <TouchableOpacity style={styles.videoCallIndicator} hitSlop={HIT_SLOP}>
+              <Ionicons name="videocam" size={14} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </TouchableOpacity>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
+        <Text style={[styles.headerTitle, { fontSize: normalize(FONTS.sizes.xxl) }]}>Messages</Text>
+      </View>
+      
+      {/* Safety Status Bar */}
+      <View style={styles.safetyStatusBar}>
+        <Ionicons name="shield-checkmark" size={16} color={COLORS.success} />
+        <Text style={styles.safetyStatusText}>AI Moderation Active • All messages are monitored for safety</Text>
+        <View style={styles.safetyIndicator} />
       </View>
 
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color={COLORS.textSecondary} />
+      <View style={[styles.searchContainer, { minHeight: MIN_TOUCH_SIZE }]}>
+        <Ionicons name="search" size={normalize(20)} color={COLORS.textSecondary} />
         <TextInput
-          style={styles.searchInput}
+          ref={searchInputRef}
+          style={[styles.searchInput, { fontSize: normalize(FONTS.sizes.md), minHeight: MIN_TOUCH_SIZE }]}
           placeholder="Search matches"
           placeholderTextColor={COLORS.textLight}
           value={searchQuery}
           onChangeText={setSearchQuery}
+          returnKeyType="search"
+          onSubmitEditing={handleSearchSubmit}
+          autoCorrect={false}
+          autoCapitalize="none"
+          clearButtonMode="while-editing"
         />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity
+            onPress={handleClearSearch}
+            hitSlop={HIT_SLOP}
+            style={styles.clearButton}
+          >
+            <Ionicons name="close-circle" size={normalize(20)} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.newMatchesSection}>
-        <Text style={styles.sectionTitle}>New Matches</Text>
+        <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>New Matches</Text>
         <FlatList
           data={NEW_MATCHES}
           renderItem={renderNewMatch}
@@ -168,26 +297,32 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.newMatchesList}
+          keyboardShouldPersistTaps="handled"
         />
       </View>
 
       <View style={styles.conversationsSection}>
-        <Text style={styles.sectionTitle}>Conversations</Text>
+        <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>Conversations</Text>
         <FlatList
           data={filteredMatches}
           renderItem={renderConversation}
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.conversationsList}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Ionicons name="chatbubbles-outline" size={60} color={COLORS.textLight} />
-              <Text style={styles.emptyTitle}>No conversations yet</Text>
-              <Text style={styles.emptySubtitle}>
+              <Ionicons name="chatbubbles-outline" size={normalize(60)} color={COLORS.textLight} />
+              <Text style={[styles.emptyTitle, { fontSize: normalize(FONTS.sizes.lg) }]}>
+                No conversations yet
+              </Text>
+              <Text style={[styles.emptySubtitle, { fontSize: normalize(FONTS.sizes.sm) }]}>
                 Start swiping to find your match!
               </Text>
             </View>
           }
+          contentInsetAdjustmentBehavior="automatic"
         />
       </View>
     </SafeAreaView>
@@ -203,8 +338,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
   },
+  safetyStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    gap: SPACING.sm,
+  },
+  safetyStatusText: {
+    flex: 1,
+    fontSize: normalize(FONTS.sizes.xs),
+    color: COLORS.success,
+    fontWeight: '500',
+  },
+  safetyIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.success,
+  },
   headerTitle: {
-    fontSize: FONTS.sizes.xxl,
     fontWeight: 'bold',
     color: COLORS.text,
   },
@@ -221,14 +377,15 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: SPACING.sm,
     paddingHorizontal: SPACING.sm,
-    fontSize: FONTS.sizes.md,
     color: COLORS.text,
+  },
+  clearButton: {
+    padding: SPACING.xs,
   },
   newMatchesSection: {
     marginBottom: SPACING.lg,
   },
   sectionTitle: {
-    fontSize: FONTS.sizes.md,
     fontWeight: '600',
     color: COLORS.text,
     paddingHorizontal: SPACING.lg,
@@ -240,16 +397,12 @@ const styles = StyleSheet.create({
   },
   newMatchItem: {
     alignItems: 'center',
-    width: 75,
   },
   newMatchImageContainer: {
     position: 'relative',
     marginBottom: SPACING.xs,
   },
   newMatchImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
     borderWidth: 2,
     borderColor: COLORS.primary,
   },
@@ -261,7 +414,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   newMatchName: {
-    fontSize: FONTS.sizes.sm,
     color: COLORS.text,
     fontWeight: '500',
     textAlign: 'center',
@@ -283,18 +435,11 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginRight: SPACING.md,
   },
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-  },
+  avatar: {},
   onlineIndicator: {
     position: 'absolute',
     bottom: 2,
     right: 2,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
     backgroundColor: COLORS.success,
     borderWidth: 2,
     borderColor: COLORS.white,
@@ -314,12 +459,10 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
   },
   conversationName: {
-    fontSize: FONTS.sizes.md,
     fontWeight: '600',
     color: COLORS.text,
   },
   timeText: {
-    fontSize: FONTS.sizes.xs,
     color: COLORS.textSecondary,
   },
   messageRow: {
@@ -329,7 +472,6 @@ const styles = StyleSheet.create({
   },
   lastMessage: {
     flex: 1,
-    fontSize: FONTS.sizes.sm,
     color: COLORS.textSecondary,
     marginRight: SPACING.sm,
   },
@@ -337,19 +479,48 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontWeight: '500',
   },
+  trustIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: SPACING.xs,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.full,
+    marginLeft: SPACING.xs,
+  },
+  trustScoreText: {
+    fontSize: 10,
+    color: COLORS.trustScore,
+    fontWeight: '600',
+  },
+  aiModerationBadge: {
+    backgroundColor: COLORS.success,
+    borderRadius: 8,
+    padding: 2,
+    marginLeft: SPACING.xs,
+  },
   unreadBadge: {
     backgroundColor: COLORS.primary,
     borderRadius: 10,
-    minWidth: 20,
-    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
   },
   unreadCount: {
-    fontSize: FONTS.sizes.xs,
     color: COLORS.white,
     fontWeight: '600',
+  },
+  communicationIndicators: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    marginLeft: SPACING.sm,
+  },
+  videoCallIndicator: {
+    padding: 2,
+    borderRadius: BORDER_RADIUS.sm,
+    backgroundColor: COLORS.background,
   },
   emptyState: {
     alignItems: 'center',
@@ -357,13 +528,11 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.xxl,
   },
   emptyTitle: {
-    fontSize: FONTS.sizes.lg,
     fontWeight: '600',
     color: COLORS.text,
     marginTop: SPACING.md,
   },
   emptySubtitle: {
-    fontSize: FONTS.sizes.sm,
     color: COLORS.textSecondary,
     marginTop: SPACING.xs,
   },

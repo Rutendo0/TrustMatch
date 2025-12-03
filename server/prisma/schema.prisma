@@ -154,6 +154,200 @@ model BlockedAccount {
   @@index([deviceId])
 }
 
+model VoiceNote {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  audioUrl    String
+  duration    Int       // in seconds
+  transcript  String?
+  prompt      String?   // what this voice note is in response to
+  
+  isActive    Boolean   @default(true)
+  playCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Event {
+  id              String    @id @default(uuid())
+  creatorId       String
+  creator         User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  
+  title           String
+  description     String
+  category        EventCategory
+  eventType       EventType
+  
+  // Location info
+  venueName       String?
+  address         String?
+  latitude        Float?
+  longitude       Float?
+  isVirtual       Boolean   @default(false)
+  
+  // Event timing
+  startDateTime   DateTime
+  endDateTime     DateTime
+  timezone        String    @default("UTC")
+  
+  // Capacity and access
+  maxAttendees    Int?
+  isPublic        Boolean   @default(true)
+  requiresApproval Boolean  @default(false)
+  
+  // Event metadata
+  interestTags    String[]  // e.g., ["travel", "food", "fitness"]
+  imageUrl        String?
+  
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  attendees       EventAttendee[]
+  
+  @@index([creatorId])
+  @@index([category])
+  @@index([eventType])
+  @@index([startDateTime])
+  @@index([latitude, longitude])
+}
+
+model EventAttendee {
+  id              String    @id @default(uuid())
+  eventId         String
+  event           Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  status          AttendeeStatus @default(PENDING)
+  joinedAt        DateTime  @default(now())
+  
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@index([userId])
+}
+
+model DateJournal {
+  id              String    @id @default(uuid())
+  matchId         String
+  match           Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  dateTitle       String?
+  dateLocation    String?
+  dateTime        DateTime?
+  
+  // Private notes
+  notes           String?   // Private thoughts about the date
+  moodRating      Int?      // 1-5 scale
+  wouldSeeAgain   Boolean?
+  
+  // Memories and photos
+  memoryTags      String[]  // e.g., ["funny", "romantic", "adventurous"]
+  photoUrls       String[]
+  
+  isPrivate       Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@unique([matchId, userId])
+  @@index([matchId])
+  @@index([userId])
+}
+
+model RelationshipMode {
+  id              String    @id @default(uuid())
+  // This represents a couple who met through the app
+  primaryUserId   String
+  partnerUserId   String
+  
+  isActive        Boolean   @default(true)
+  startedAt       DateTime  @default(now())
+  
+  // Relationship details
+  anniversaryDate DateTime?
+  status          RelationshipStatus @default(ACTIVE)
+  
+  // Settings
+  discoveryPaused Boolean   @default(true)
+  profileVisible  Boolean   @default(false)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@unique([primaryUserId, partnerUserId])
+  @@index([primaryUserId])
+  @@index([partnerUserId])
+}
+
+model VerifiedReview {
+  id              String    @id @default(uuid())
+  reviewerId      String
+  reviewer        User      @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewedId      String
+  
+  matchId         String    // The match this review is about
+  match           Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  
+  // Review categories
+  profileAccuracy Int       // 1-5: How accurate was their profile?
+  conversationQuality Int   // 1-5: Quality of conversation
+  authenticity     Int      // 1-5: How authentic did they seem?
+  punctuality      Int?     // 1-5: Were they on time?
+  chemistry        Int?     // 1-5: Was there chemistry?
+  
+  overallRating   Float     // 1-5 overall experience
+  
+  // Detailed feedback
+  positives       String[]  // What went well
+  improvements    String[]  // Areas for improvement
+  additionalComments String?
+  
+  // Verification
+  isVerified      Boolean   @default(false) // Verified through mutual match confirmation
+  verifiedAt      DateTime?
+  
+  // Moderation
+  isFlagged       Boolean   @default(false)
+  flagReason      String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([reviewedId])
+  @@index([reviewerId])
+  @@index([matchId])
+  @@index([createdAt])
+}
+
+model MessageStatus {
+  id              String    @id @default(uuid())
+  messageId       String    @unique
+  message         Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  
+  isRead          Boolean   @default(false)
+  readAt          DateTime?
+  
+  // Typing indicator
+  isTyping        Boolean   @default(false)
+  typingStartedAt DateTime?
+  typingEndedAt   DateTime?
+  
+  // Delivery status
+  deliveredAt     DateTime?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([messageId])
+}
+
 enum Gender {
   MALE
   FEMALE
@@ -182,4 +376,39 @@ enum MessageType {
   TEXT
   IMAGE
   GIF
+  VOICE_NOTE
+}
+
+enum EventCategory {
+  FOOD_DRINKS
+  OUTDOOR_ADVENTURE
+  ARTS_CULTURE
+  FITNESS_WELLNESS
+  MUSIC_ENTERTAINMENT
+  TRAVEL_EXPLORATION
+  TECH_INNOVATION
+  BOOKS_LEARNING
+  VOLUNTEER_SOCIAL
+  DATING_RELATIONSHIPS
+  OTHER
+}
+
+enum EventType {
+  VIRTUAL
+  IN_PERSON
+  HYBRID
+}
+
+enum AttendeeStatus {
+  PENDING
+  CONFIRMED
+  ATTENDED
+  CANCELLED
+  NO_SHOW
+}
+
+enum RelationshipStatus {
+  ACTIVE
+  PAUSED
+  ENDED
 }

@@ -9,8 +9,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/common';
-import { COLORS, FONTS, SPACING } from '../../constants/theme';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -26,29 +27,43 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
       <View style={styles.header}>
         <View style={styles.logoContainer}>
           <View style={styles.logo}>
-            <Text style={styles.logoText}>TM</Text>
+            <Ionicons name="shield-checkmark" size={48} color={COLORS.primary} />
           </View>
           <Text style={styles.appName}>TrustMatch</Text>
+          <Text style={styles.tagline}>Where Authentic Connections Begin</Text>
+          <View style={styles.trustBadge}>
+            <Ionicons name="star" size={16} color={COLORS.warning} />
+            <Text style={styles.trustText}>99% Verified Profiles</Text>
+          </View>
         </View>
-        <Text style={styles.tagline}>Where Trust Meets Love</Text>
       </View>
 
       <View style={styles.content}>
+        <Text style={styles.sectionTitle}>Why Choose TrustMatch?</Text>
         <View style={styles.featureList}>
           <FeatureItem
-            icon="🔒"
-            title="AI-Verified Profiles"
-            description="Every user verified with ID & live selfie"
+            icon="shield-checkmark"
+            iconLibrary="Ionicons"
+            title="100% Verified Users"
+            description="ID verification + live selfie matching ensures real people"
           />
           <FeatureItem
-            icon="🛡️"
-            title="No Fake Accounts"
-            description="Advanced duplicate detection technology"
+            icon="trending-up"
+            iconLibrary="Ionicons"
+            title="TrustScore Matching"
+            description="AI-powered compatibility based on personality & values"
           />
           <FeatureItem
-            icon="❤️"
-            title="Real Connections"
-            description="Meet authentic people, build genuine relationships"
+            icon="heart"
+            iconLibrary="Ionicons"
+            title="Quality Over Quantity"
+            description="Fewer matches, but each one is genuine and compatible"
+          />
+          <FeatureItem
+            icon="videocam"
+            iconLibrary="Ionicons"
+            title="Safe Video Dates"
+            description="Built-in video calling with safety features"
           />
         </View>
       </View>
@@ -79,11 +94,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
 
 const FeatureItem: React.FC<{
   icon: string;
+  iconLibrary?: string;
   title: string;
   description: string;
-}> = ({ icon, title, description }) => (
+}> = ({ icon, iconLibrary = 'emoji', title, description }) => (
   <View style={styles.featureItem}>
-    <Text style={styles.featureIcon}>{icon}</Text>
+    <View style={styles.featureIcon}>
+      {iconLibrary === 'Ionicons' ? (
+        <Ionicons name={icon as any} size={24} color={COLORS.primary} />
+      ) : (
+        <Text style={styles.featureIconEmoji}>{icon}</Text>
+      )}
+    </View>
     <View style={styles.featureText}>
       <Text style={styles.featureTitle}>{title}</Text>
       <Text style={styles.featureDescription}>{description}</Text>
@@ -105,6 +127,21 @@ const styles = StyleSheet.create({
   logoContainer: {
     alignItems: 'center',
     marginBottom: SPACING.md,
+  },
+  trustBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    marginTop: SPACING.md,
+    gap: SPACING.xs,
+  },
+  trustText: {
+    color: COLORS.white,
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
   },
   logo: {
     width: 100,
@@ -148,9 +185,20 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
   },
   featureIcon: {
-    fontSize: 32,
     width: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureIconEmoji: {
+    fontSize: 32,
     textAlign: 'center',
+  },
+  sectionTitle: {
+    fontSize: FONTS.sizes.xl,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
   },
   featureText: {
     flex: 1,

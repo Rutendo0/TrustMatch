@@ -8,6 +8,7 @@ import {
   TextStyle,
 } from 'react-native';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { normalize, MIN_TOUCH_SIZE } from '../../hooks/useResponsive';
 
 interface ButtonProps {
   title: string;
@@ -19,6 +20,9 @@ interface ButtonProps {
   icon?: React.ReactNode;
   style?: ViewStyle;
   textStyle?: TextStyle;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  accessibilityRole?: 'button' | 'link';
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -31,6 +35,9 @@ export const Button: React.FC<ButtonProps> = ({
   icon,
   style,
   textStyle,
+  accessibilityLabel,
+  accessibilityHint,
+  accessibilityRole = 'button',
 }) => {
   const buttonStyles = [
     styles.base,
@@ -54,6 +61,10 @@ export const Button: React.FC<ButtonProps> = ({
       onPress={onPress}
       disabled={disabled || loading}
       activeOpacity={0.8}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      accessibilityLabel={accessibilityLabel || title}
+      accessibilityHint={accessibilityHint}
+      accessibilityRole={accessibilityRole}
     >
       {loading ? (
         <ActivityIndicator
@@ -76,7 +87,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: BORDER_RADIUS.md,
-    gap: SPACING.sm,
+    gap: normalize(SPACING.sm),
+    minHeight: MIN_TOUCH_SIZE,
   },
   primary: {
     backgroundColor: COLORS.primary,
@@ -94,16 +106,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   smallSize: {
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
+    paddingVertical: normalize(SPACING.sm),
+    paddingHorizontal: normalize(SPACING.md),
+    minHeight: MIN_TOUCH_SIZE,
   },
   mediumSize: {
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.lg,
+    paddingVertical: normalize(SPACING.md),
+    paddingHorizontal: normalize(SPACING.lg),
+    minHeight: MIN_TOUCH_SIZE,
   },
   largeSize: {
-    paddingVertical: SPACING.lg,
-    paddingHorizontal: SPACING.xl,
+    paddingVertical: normalize(SPACING.lg),
+    paddingHorizontal: normalize(SPACING.xl),
+    minHeight: MIN_TOUCH_SIZE + 8,
   },
   disabled: {
     opacity: 0.5,
@@ -124,13 +139,13 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   smallText: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: normalize(FONTS.sizes.sm),
   },
   mediumText: {
-    fontSize: FONTS.sizes.md,
+    fontSize: normalize(FONTS.sizes.md),
   },
   largeText: {
-    fontSize: FONTS.sizes.lg,
+    fontSize: normalize(FONTS.sizes.lg),
   },
   disabledText: {
     opacity: 0.7,

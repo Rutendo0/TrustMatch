@@ -3,22 +3,27 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 
 import { WelcomeScreen } from '../screens/auth/WelcomeScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { IDVerificationScreen } from '../screens/auth/IDVerificationScreen';
+import { PhotoUploadScreen } from '../screens/auth/PhotoUploadScreen';
 import { SelfieVerificationScreen } from '../screens/auth/SelfieVerificationScreen';
 import { HomeScreen } from '../screens/main/HomeScreen';
 import { MessagesScreen } from '../screens/main/MessagesScreen';
 import { ChatScreen } from '../screens/main/ChatScreen';
 import { ProfileScreen } from '../screens/main/ProfileScreen';
+import { ProfileDetailScreen } from '../screens/main/ProfileDetailScreen';
 import { VideoCallScreen } from '../screens/main/VideoCallScreen';
 import { EventsScreen } from '../screens/main/EventsScreen';
 import { LikesScreen } from '../screens/main/LikesScreen';
+import { SettingsScreen } from '../screens/main/SettingsScreen';
+import { FilterScreen } from '../screens/main/FilterScreen';
 import { PersonalityQuizScreen } from '../screens/profile/PersonalityQuizScreen';
 import { DealbreakersScreen } from '../screens/profile/DealbreakersScreen';
+import { ProfileSetupScreen } from '../screens/profile/ProfileSetupScreen';
 import { COLORS, SHADOWS } from '../constants/theme';
 
 export type RootStackParamList = {
@@ -26,13 +31,18 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   IDVerification: { formData: any };
+  PhotoUploadScreen: { formData: any };
   SelfieVerification: { formData: any };
+  ProfileSetup: { formData: any };
   MainTabs: undefined;
   Chat: { matchId: string; name: string };
   VideoCall: { matchId: string; userName: string; userPhoto: string; isIncoming?: boolean };
   Events: undefined;
   PersonalityQuiz: undefined;
   Dealbreakers: undefined;
+  Settings: undefined;
+  Filters: undefined;
+  ProfileDetail: { profile: any };
 };
 
 export type MainTabParamList = {
@@ -52,6 +62,7 @@ const MainTabs = () => {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        lazy: false,
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: keyof typeof Ionicons.glyphMap;
 
@@ -78,7 +89,9 @@ const MainTabs = () => {
         tabBarInactiveTintColor: COLORS.textSecondary,
         tabBarStyle: styles.tabBar,
         tabBarLabelStyle: styles.tabBarLabel,
+        tabBarHideOnKeyboard: true,
       })}
+      detachInactiveScreens={false}
     >
       <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: 'Discover' }} />
       <Tab.Screen name="Likes" component={LikesScreen} options={{ tabBarLabel: 'Likes' }} />
@@ -101,7 +114,9 @@ export const AppNavigator = () => {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />
         <Stack.Screen name="IDVerification" component={IDVerificationScreen} />
+        <Stack.Screen name="PhotoUploadScreen" component={PhotoUploadScreen} />
         <Stack.Screen name="SelfieVerification" component={SelfieVerificationScreen} />
+        <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen
           name="Chat"
@@ -116,6 +131,13 @@ export const AppNavigator = () => {
         <Stack.Screen name="Events" component={EventsScreen} />
         <Stack.Screen name="PersonalityQuiz" component={PersonalityQuizScreen} />
         <Stack.Screen name="Dealbreakers" component={DealbreakersScreen} />
+        <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="Filters" component={FilterScreen} />
+        <Stack.Screen 
+          name="ProfileDetail" 
+          component={ProfileDetailScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -124,14 +146,16 @@ export const AppNavigator = () => {
 const styles = StyleSheet.create({
   tabBar: {
     backgroundColor: COLORS.white,
-    borderTopWidth: 0,
-    height: 60,
-    paddingBottom: 8,
-    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    height: 80,
+    paddingBottom: 10,
+    paddingTop: 10,
     ...SHADOWS.small,
   },
   tabBarLabel: {
     fontSize: 11,
     fontWeight: '600',
+    marginTop: 2,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,12 +9,15 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { useResponsive, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 
 type ChatScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -23,10 +26,14 @@ type ChatScreenProps = {
 
 interface Message {
   id: string;
-  text: string;
+  text?: string;
+  audio?: string; // audio file URI
+  audioDuration?: number; // duration in seconds
   senderId: string;
   timestamp: Date;
   status: 'sent' | 'delivered' | 'read';
+  type: 'text' | 'audio';
+  isPlaying?: boolean;
 }
 
 const CURRENT_USER_ID = 'me';
@@ -38,6 +45,7 @@ const MOCK_MESSAGES: Message[] = [
     senderId: 'other',
     timestamp: new Date(Date.now() - 3600000),
     status: 'read',
+    type: 'text',
   },
   {
     id: '2',
@@ -45,6 +53,7 @@ const MOCK_MESSAGES: Message[] = [
     senderId: CURRENT_USER_ID,
     timestamp: new Date(Date.now() - 3500000),
     status: 'read',
+    type: 'text',
   },
   {
     id: '3',
@@ -52,6 +61,7 @@ const MOCK_MESSAGES: Message[] = [
     senderId: 'other',
     timestamp: new Date(Date.now() - 3400000),
     status: 'read',
+    type: 'text',
   },
   {
     id: '4',
@@ -59,6 +69,7 @@ const MOCK_MESSAGES: Message[] = [
     senderId: CURRENT_USER_ID,
     timestamp: new Date(Date.now() - 3300000),
     status: 'read',
+    type: 'text',
   },
   {
     id: '5',
@@ -66,6 +77,7 @@ const MOCK_MESSAGES: Message[] = [
     senderId: 'other',
     timestamp: new Date(Date.now() - 300000),
     status: 'read',
+    type: 'text',
   },
 ];
 
@@ -73,7 +85,157 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
   const { matchId, name } = route.params as { matchId: string; name: string };
   const [messages, setMessages] = useState(MOCK_MESSAGES);
   const [inputText, setInputText] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [currentPlayingId, setCurrentPlayingId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const { isSmall, isTablet, height } = useResponsive();
+
+  const keyboardVerticalOffset = Platform.select({
+    ios: isSmall ? 60 : isTablet ? 80 : 70,
+    android: 0,
+  }) ?? 0;
+
+  // Audio recording and playback functions
+  const startAudioRecording = async () => {
+    try {
+      // Request microphone permissions
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Microphone access is required for audio recording.');
+        return;
+      }
+
+      // Set audio mode for recording
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      // Start duration timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => {
+          if (prev >= 30) { // Max 30 seconds
+            stopAudioRecording();
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+
+    } catch (error) {
+      console.error('Failed to start recording', error);
+      Alert.alert('Recording Error', 'Failed to start audio recording. Please try again.');
+    }
+  };
+
+  const stopAudioRecording = async () => {
+    try {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+        const uri = recordingRef.current.getURI();
+        
+        if (uri) {
+          // Get recording duration
+          const status = await recordingRef.current.getStatusAsync();
+          const duration = status.durationMillis ? Math.round(status.durationMillis / 1000) : recordingDuration;
+
+          // Send audio message
+          const audioMessage: Message = {
+            id: Date.now().toString(),
+            audio: uri,
+            audioDuration: duration,
+            senderId: CURRENT_USER_ID,
+            timestamp: new Date(),
+            status: 'sent',
+            type: 'audio',
+          };
+          
+          setMessages((prev) => [...prev, audioMessage]);
+          
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        }
+        
+        recordingRef.current = null;
+      }
+    } catch (error) {
+      console.error('Failed to stop recording', error);
+      Alert.alert('Recording Error', 'Failed to save audio recording. Please try again.');
+    } finally {
+      setIsRecording(false);
+      setRecordingDuration(0);
+    }
+  };
+
+  const playAudioMessage = async (messageId: string, audioUri: string) => {
+    try {
+      // Stop current playing audio if any
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+
+      // Set current playing message
+      setCurrentPlayingId(messageId);
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId ? { ...msg, isPlaying: true } : { ...msg, isPlaying: false }
+      ));
+
+      // Create and play sound
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
+      soundRef.current = sound;
+
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && !status.isPlaying) {
+          setCurrentPlayingId(null);
+          setMessages(prev => prev.map(msg => ({ ...msg, isPlaying: false })));
+        }
+      });
+
+      await sound.playAsync();
+
+    } catch (error) {
+      console.error('Failed to play audio', error);
+      Alert.alert('Playback Error', 'Failed to play audio message. Please try again.');
+      setCurrentPlayingId(null);
+      setMessages(prev => prev.map(msg => ({ ...msg, isPlaying: false })));
+    }
+  };
+
+  // Cleanup function
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+      if (soundRef.current) {
+        soundRef.current.stopAsync();
+        soundRef.current.unloadAsync();
+      }
+      if (recordingRef.current) {
+        recordingRef.current.stopAndUnloadAsync();
+      }
+    };
+  }, []);
 
   const sendMessage = () => {
     if (!inputText.trim()) return;
@@ -84,6 +246,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
       senderId: CURRENT_USER_ID,
       timestamp: new Date(),
       status: 'sent',
+      type: 'text',
     };
 
     setMessages((prev) => [...prev, newMessage]);
@@ -93,6 +256,17 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
   };
+
+  const startVideoCall = () => {
+    navigation.navigate('VideoCall', {
+      matchId,
+      userName: name,
+      userPhoto: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100',
+      isIncoming: false
+    });
+  };
+
+
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -116,9 +290,42 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
             isMe ? styles.myMessage : styles.theirMessage,
           ]}
         >
-          <Text style={[styles.messageText, isMe && styles.myMessageText]}>
-            {item.text}
-          </Text>
+          {item.type === 'audio' ? (
+            <TouchableOpacity 
+              style={styles.audioMessage}
+              onPress={() => item.audio && playAudioMessage(item.id, item.audio)}
+              disabled={!item.audio}
+            >
+              <Ionicons 
+                name={item.isPlaying ? "pause" : "play"} 
+                size={20} 
+                color={isMe ? COLORS.white : COLORS.text} 
+              />
+              <View style={styles.audioTextContainer}>
+                <Text style={[styles.audioText, isMe && styles.myMessageText]}>
+                  Voice message
+                </Text>
+                {item.audioDuration && (
+                  <Text style={[styles.audioDuration, isMe && styles.myMessageText]}>
+                    {item.audioDuration}s
+                  </Text>
+                )}
+                {item.isPlaying && (
+                  <View style={styles.waveformContainer}>
+                    <View style={styles.waveformDot} />
+                    <View style={styles.waveformDot} />
+                    <View style={styles.waveformDot} />
+                    <View style={styles.waveformDot} />
+                    <View style={styles.waveformDot} />
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <Text style={[styles.messageText, isMe && styles.myMessageText]}>
+              {item.text}
+            </Text>
+          )}
         </View>
         {isMe && index === messages.length - 1 && (
           <View style={styles.statusContainer}>
@@ -145,11 +352,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
+          hitSlop={HIT_SLOP}
         >
           <Ionicons name="chevron-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.profileInfo}>
+        <TouchableOpacity style={styles.profileInfo} hitSlop={HIT_SLOP}>
           <Image
             source={{ uri: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' }}
             style={styles.avatar}
@@ -163,15 +371,19 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.moreButton}>
+        <TouchableOpacity style={styles.videoCallButton} hitSlop={HIT_SLOP} onPress={startVideoCall}>
+          <Ionicons name="videocam" size={20} color={COLORS.primary} />
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.moreButton} hitSlop={HIT_SLOP}>
           <Ionicons name="ellipsis-vertical" size={20} color={COLORS.text} />
         </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={keyboardVerticalOffset}
       >
         <FlatList
           ref={flatListRef}
@@ -181,43 +393,68 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
           contentContainerStyle={styles.messagesList}
           showsVerticalScrollIndicator={false}
           onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          keyboardShouldPersistTaps="handled"
         />
 
-        <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.attachButton}>
-            <Ionicons name="add-circle" size={28} color={COLORS.primary} />
-          </TouchableOpacity>
-
-          <View style={styles.textInputContainer}>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Type a message..."
-              placeholderTextColor={COLORS.textLight}
-              value={inputText}
-              onChangeText={setInputText}
-              multiline
-              maxLength={1000}
-            />
-            <TouchableOpacity style={styles.emojiButton}>
-              <Ionicons name="happy-outline" size={24} color={COLORS.textSecondary} />
+        <SafeAreaView edges={['bottom']} style={styles.inputSafeArea}>
+          <View style={styles.inputContainer}>
+            <TouchableOpacity style={styles.attachButton} hitSlop={HIT_SLOP}>
+              <Ionicons name="add-circle" size={28} color={COLORS.primary} />
             </TouchableOpacity>
-          </View>
 
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              inputText.trim() && styles.sendButtonActive,
-            ]}
-            onPress={sendMessage}
-            disabled={!inputText.trim()}
-          >
-            <Ionicons
-              name="send"
-              size={20}
-              color={inputText.trim() ? COLORS.white : COLORS.textLight}
-            />
-          </TouchableOpacity>
-        </View>
+            <View style={styles.textInputContainer}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Type a message..."
+                placeholderTextColor={COLORS.textLight}
+                value={inputText}
+                onChangeText={setInputText}
+                multiline
+                maxLength={1000}
+              />
+              <TouchableOpacity style={styles.emojiButton} hitSlop={HIT_SLOP}>
+                <Ionicons name="happy-outline" size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {inputText.trim() ? (
+              <TouchableOpacity
+                style={styles.sendButton}
+                onPress={sendMessage}
+                hitSlop={HIT_SLOP}
+              >
+                <Ionicons
+                  name="send"
+                  size={20}
+                  color={COLORS.white}
+                />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[
+                  styles.audioButton,
+                  isRecording && [
+                    styles.audioButtonRecording,
+                    styles.recordingPulse
+                  ],
+                ]}
+                onPress={isRecording ? stopAudioRecording : startAudioRecording}
+                hitSlop={HIT_SLOP}
+              >
+                <Ionicons
+                  name={isRecording ? "square" : "mic"}
+                  size={20}
+                  color={isRecording ? COLORS.white : COLORS.primary}
+                />
+                {isRecording && (
+                  <Text style={styles.recordingDuration}>
+                    {recordingDuration}s
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        </SafeAreaView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -237,8 +474,8 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
   },
   backButton: {
-    width: 40,
-    height: 40,
+    width: MIN_TOUCH_SIZE,
+    height: MIN_TOUCH_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -247,6 +484,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+    minHeight: MIN_TOUCH_SIZE,
   },
   avatar: {
     width: 40,
@@ -267,9 +505,15 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xs,
     color: COLORS.success,
   },
+  videoCallButton: {
+    width: MIN_TOUCH_SIZE,
+    height: MIN_TOUCH_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   moreButton: {
-    width: 40,
-    height: 40,
+    width: MIN_TOUCH_SIZE,
+    height: MIN_TOUCH_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -313,22 +557,57 @@ const styles = StyleSheet.create({
   myMessageText: {
     color: COLORS.white,
   },
+  audioMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  audioTextContainer: {
+    flexDirection: 'column',
+    gap: 2,
+  },
+  audioText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text,
+  },
+  audioDuration: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.textSecondary,
+  },
+  waveformContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  waveformDot: {
+    width: 2,
+    height: 8,
+    backgroundColor: COLORS.textSecondary,
+    borderRadius: 1,
+  },
+  playButton: {
+    padding: SPACING.xs,
+  },
   statusContainer: {
     alignSelf: 'flex-end',
     marginTop: 2,
+  },
+  inputSafeArea: {
+    backgroundColor: COLORS.white,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     gap: SPACING.sm,
   },
   attachButton: {
-    width: 40,
-    height: 40,
+    width: MIN_TOUCH_SIZE,
+    height: MIN_TOUCH_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -339,31 +618,55 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.xl,
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
+    paddingVertical: Platform.OS === 'ios' ? SPACING.sm : SPACING.xs,
+    minHeight: MIN_TOUCH_SIZE,
     maxHeight: 120,
   },
   textInput: {
     flex: 1,
     fontSize: FONTS.sizes.md,
     color: COLORS.text,
-    paddingVertical: SPACING.xs,
+    paddingVertical: Platform.OS === 'ios' ? SPACING.xs : 0,
+    minHeight: 24,
     maxHeight: 100,
   },
   emojiButton: {
-    width: 32,
-    height: 32,
+    width: MIN_TOUCH_SIZE,
+    height: MIN_TOUCH_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.border,
+    width: MIN_TOUCH_SIZE,
+    height: MIN_TOUCH_SIZE,
+    borderRadius: MIN_TOUCH_SIZE / 2,
+    backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendButtonActive: {
-    backgroundColor: COLORS.primary,
+  audioButton: {
+    width: MIN_TOUCH_SIZE,
+    height: MIN_TOUCH_SIZE,
+    borderRadius: MIN_TOUCH_SIZE / 2,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: SPACING.xs,
+  },
+  audioButtonRecording: {
+    backgroundColor: COLORS.error,
+  },
+  recordingPulse: {
+    shadowColor: COLORS.error,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  recordingDuration: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.error,
+    fontWeight: '600',
   },
 });

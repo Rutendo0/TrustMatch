@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Button, Card } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { AISecurityService, PhotoQualityAnalysis } from '../../services/AISecurityService';
 
 type IDVerificationScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -30,6 +31,8 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
   const [selectedIDType, setSelectedIDType] = useState<IDType | null>(null);
   const [idImage, setIdImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [photoAnalysis, setPhotoAnalysis] = useState<PhotoQualityAnalysis | null>(null);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
 
   const idTypes: { type: IDType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { type: 'passport', label: 'Passport', icon: 'document' },
@@ -56,7 +59,9 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
     });
 
     if (!result.canceled) {
-      setIdImage(result.assets[0].uri);
+      const imageUri = result.assets[0].uri;
+      setIdImage(imageUri);
+      await analyzePhoto(imageUri);
     }
   };
 
@@ -78,7 +83,23 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
     });
 
     if (!result.canceled) {
-      setIdImage(result.assets[0].uri);
+      const imageUri = result.assets[0].uri;
+      setIdImage(imageUri);
+      await analyzePhoto(imageUri);
+    }
+  };
+
+  const analyzePhoto = async (imageUri: string) => {
+    setAnalyzingPhoto(true);
+    try {
+      const aiService = AISecurityService.getInstance();
+      const analysis = await aiService.analyzePhotoQuality(imageUri);
+      setPhotoAnalysis(analysis);
+    } catch (error) {
+      console.error('Photo analysis failed:', error);
+      // Continue without analysis if service fails
+    } finally {
+      setAnalyzingPhoto(false);
     }
   };
 
@@ -93,12 +114,30 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       return;
     }
 
-    navigation.navigate('SelfieVerification', {
+    // Check photo quality if analysis is available
+    if (photoAnalysis && photoAnalysis.score < 70) {
+      Alert.alert(
+        'Photo Quality Issues',
+        'Your ID photo has quality issues. Please retake with better lighting and clarity.',
+        [
+          { text: 'Retake Photo', onPress: () => setIdImage(null) },
+          { text: 'Continue Anyway', onPress: () => proceedToNext() }
+        ]
+      );
+      return;
+    }
+
+    proceedToNext();
+  };
+
+  const proceedToNext = () => {
+    navigation.navigate('PhotoUploadScreen', {
       formData: {
         ...formData,
         idDocument: {
           type: selectedIDType,
           imageUri: idImage,
+          photoAnalysis: photoAnalysis,
         },
       },
     });
@@ -168,10 +207,47 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
             <Image source={{ uri: idImage }} style={styles.imagePreview} />
             <TouchableOpacity
               style={styles.removeImageButton}
-              onPress={() => setIdImage(null)}
+              onPress={() => {
+                setIdImage(null);
+                setPhotoAnalysis(null);
+              }}
             >
               <Ionicons name="close-circle" size={28} color={COLORS.error} />
             </TouchableOpacity>
+            
+            {/* AI Photo Analysis Results */}
+            {analyzingPhoto && (
+              <View style={styles.analysisContainer}>
+                <Ionicons name="scan" size={20} color={COLORS.primary} />
+                <Text style={styles.analysisText}>Analyzing photo quality...</Text>
+              </View>
+            )}
+            
+            {photoAnalysis && (
+              <View style={[
+                styles.analysisContainer,
+                { backgroundColor: photoAnalysis.score >= 70 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }
+              ]}>
+                <Ionicons 
+                  name={photoAnalysis.score >= 70 ? "checkmark-circle" : "warning"} 
+                  size={20} 
+                  color={photoAnalysis.score >= 70 ? COLORS.success : COLORS.error} 
+                />
+                <View style={styles.analysisDetails}>
+                  <Text style={[
+                    styles.analysisScore,
+                    { color: photoAnalysis.score >= 70 ? COLORS.success : COLORS.error }
+                  ]}>
+                    Photo Quality: {photoAnalysis.score}/100
+                  </Text>
+                  {photoAnalysis.recommendations.length > 0 && (
+                    <Text style={styles.analysisRecommendation}>
+                      {photoAnalysis.recommendations[0]}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
           </View>
         ) : (
           <View style={styles.uploadContainer}>
@@ -198,7 +274,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
       <View style={styles.footer}>
         <Button
-          title="Continue to Selfie Verification"
+          title="Continue to Photo Upload"
           onPress={handleContinue}
           loading={isLoading}
           disabled={!selectedIDType || !idImage}
@@ -352,6 +428,35 @@ const styles = StyleSheet.create({
     right: SPACING.sm,
     backgroundColor: COLORS.white,
     borderRadius: 14,
+  },
+  analysisContainer: {
+    position: 'absolute',
+    bottom: SPACING.sm,
+    left: SPACING.sm,
+    right: SPACING.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.md,
+    gap: SPACING.xs,
+  },
+  analysisText: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
+  analysisDetails: {
+    flex: 1,
+  },
+  analysisScore: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+  },
+  analysisRecommendation: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   infoCard: {
     backgroundColor: COLORS.background,

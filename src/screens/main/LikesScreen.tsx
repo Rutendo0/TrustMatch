@@ -26,6 +26,7 @@ interface LikeProfile {
   isBlurred: boolean;
 }
 
+// People who liked you
 const MOCK_LIKES: LikeProfile[] = [
   {
     id: '1',
@@ -74,26 +75,180 @@ const MOCK_LIKES: LikeProfile[] = [
   },
 ];
 
+// People you liked
+const MOCK_SENT_LIKES: LikeProfile[] = [
+  {
+    id: '6',
+    name: 'Michael',
+    age: 29,
+    photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300',
+    isVerified: true,
+    likedAt: '1 hour ago',
+    isBlurred: false,
+  },
+  {
+    id: '7',
+    name: 'David',
+    age: 31,
+    photo: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300',
+    isVerified: true,
+    likedAt: '3 hours ago',
+    isBlurred: false,
+  },
+  {
+    id: '8',
+    name: 'James',
+    age: 27,
+    photo: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300',
+    isVerified: true,
+    likedAt: 'Yesterday',
+    isBlurred: false,
+  },
+  {
+    id: '9',
+    name: 'Chris',
+    age: 30,
+    photo: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=300',
+    isVerified: false,
+    likedAt: '2 days ago',
+    isBlurred: false,
+  },
+];
+
+type TabType = 'received' | 'sent';
+
 export const LikesScreen: React.FC = () => {
   const [isPremium] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('received');
   const visibleLikes = isPremium ? MOCK_LIKES : MOCK_LIKES.slice(0, 1);
   const blurredCount = isPremium ? 0 : MOCK_LIKES.length - 1;
 
+  const renderProfileCard = (profile: LikeProfile, index: number, isReceived: boolean) => {
+    const isBlurred = isReceived && !isPremium && index > 0;
+    
+    return (
+      <TouchableOpacity
+        key={profile.id}
+        style={styles.profileCard}
+        disabled={isBlurred}
+      >
+        <View style={styles.imageContainer}>
+          <Image
+            source={{ uri: profile.photo }}
+            style={[styles.profileImage, isBlurred && styles.blurredImage]}
+            blurRadius={isBlurred ? 20 : 0}
+          />
+          {!isBlurred && profile.isVerified && (
+            <View style={styles.verifiedBadge}>
+              <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+            </View>
+          )}
+          {isBlurred && (
+            <View style={styles.lockOverlay}>
+              <Ionicons name="lock-closed" size={24} color={COLORS.white} />
+            </View>
+          )}
+          {!isReceived && (
+            <View style={styles.sentBadge}>
+              <Ionicons name="heart" size={14} color={COLORS.white} />
+            </View>
+          )}
+        </View>
+        
+        <View style={styles.profileInfo}>
+          {isBlurred ? (
+            <Text style={styles.blurredName}>••••••, ••</Text>
+          ) : (
+            <>
+              <Text style={styles.profileName}>
+                {profile.name}, {profile.age}
+              </Text>
+              <Text style={styles.likedAt}>
+                {isReceived ? `Liked you ${profile.likedAt}` : `You liked ${profile.likedAt}`}
+              </Text>
+            </>
+          )}
+        </View>
+
+        {!isBlurred && isReceived && (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity style={styles.rejectButton}>
+              <Ionicons name="close" size={20} color={COLORS.error} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.likeButton}>
+              <Ionicons name="heart" size={20} color={COLORS.success} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {!isBlurred && !isReceived && (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity style={styles.undoButton}>
+              <Ionicons name="arrow-undo" size={18} color={COLORS.textSecondary} />
+              <Text style={styles.undoText}>Undo</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Who Likes You</Text>
+        <Text style={styles.headerTitle}>Likes</Text>
         <View style={styles.likeCount}>
           <Ionicons name="heart" size={18} color={COLORS.primary} />
           <Text style={styles.likeCountText}>{MOCK_LIKES.length}</Text>
         </View>
       </View>
 
+      {/* Tab Switcher */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'received' && styles.activeTab]}
+          onPress={() => setActiveTab('received')}
+        >
+          <Ionicons 
+            name="heart" 
+            size={20} 
+            color={activeTab === 'received' ? COLORS.primary : COLORS.textSecondary} 
+          />
+          <Text style={[styles.tabText, activeTab === 'received' && styles.activeTabText]}>
+            Who Likes You
+          </Text>
+          <View style={[styles.tabBadge, activeTab === 'received' && styles.activeTabBadge]}>
+            <Text style={[styles.tabBadgeText, activeTab === 'received' && styles.activeTabBadgeText]}>
+              {MOCK_LIKES.length}
+            </Text>
+          </View>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'sent' && styles.activeTab]}
+          onPress={() => setActiveTab('sent')}
+        >
+          <Ionicons 
+            name="paper-plane" 
+            size={20} 
+            color={activeTab === 'sent' ? COLORS.primary : COLORS.textSecondary} 
+          />
+          <Text style={[styles.tabText, activeTab === 'sent' && styles.activeTabText]}>
+            You Liked
+          </Text>
+          <View style={[styles.tabBadge, activeTab === 'sent' && styles.activeTabBadge]}>
+            <Text style={[styles.tabBadgeText, activeTab === 'sent' && styles.activeTabBadgeText]}>
+              {MOCK_SENT_LIKES.length}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView showsVerticalScrollIndicator={false}>
-        {!isPremium && (
+        {activeTab === 'received' && !isPremium && (
           <Card style={styles.premiumCard}>
             <View style={styles.premiumIcon}>
-              <Ionicons name="diamond" size={32} color="#8B5CF6" />
+              <Ionicons name="diamond" size={32} color={COLORS.primary} />
             </View>
             <Text style={styles.premiumTitle}>See All Your Likes</Text>
             <Text style={styles.premiumSubtitle}>
@@ -108,117 +263,81 @@ export const LikesScreen: React.FC = () => {
         )}
 
         <View style={styles.grid}>
-          {MOCK_LIKES.map((profile, index) => {
-            const isBlurred = !isPremium && index > 0;
+          {activeTab === 'received' 
+            ? MOCK_LIKES.map((profile, index) => renderProfileCard(profile, index, true))
+            : MOCK_SENT_LIKES.map((profile, index) => renderProfileCard(profile, index, false))
+          }
+        </View>
+
+        {activeTab === 'received' && (
+          <View style={styles.insightsSection}>
+            <Text style={styles.sectionTitle}>Profile Insights</Text>
             
-            return (
-              <TouchableOpacity
-                key={profile.id}
-                style={styles.profileCard}
-                disabled={isBlurred}
-              >
-                <View style={styles.imageContainer}>
-                  <Image
-                    source={{ uri: profile.photo }}
-                    style={[styles.profileImage, isBlurred && styles.blurredImage]}
-                    blurRadius={isBlurred ? 20 : 0}
-                  />
-                  {!isBlurred && profile.isVerified && (
-                    <View style={styles.verifiedBadge}>
-                      <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
-                    </View>
-                  )}
-                  {isBlurred && (
-                    <View style={styles.lockOverlay}>
-                      <Ionicons name="lock-closed" size={24} color={COLORS.white} />
-                    </View>
-                  )}
+            <Card style={styles.insightCard}>
+              <View style={styles.insightRow}>
+                <View style={styles.insightIcon}>
+                  <Ionicons name="eye" size={24} color={COLORS.primary} />
                 </View>
-                
-                <View style={styles.profileInfo}>
-                  {isBlurred ? (
-                    <Text style={styles.blurredName}>••••••, ••</Text>
-                  ) : (
-                    <>
-                      <Text style={styles.profileName}>
-                        {profile.name}, {profile.age}
-                      </Text>
-                      <Text style={styles.likedAt}>{profile.likedAt}</Text>
-                    </>
-                  )}
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightValue}>156</Text>
+                  <Text style={styles.insightLabel}>Profile Views (7 days)</Text>
                 </View>
+                <View style={styles.insightTrend}>
+                  <Ionicons name="trending-up" size={16} color={COLORS.success} />
+                  <Text style={styles.trendText}>+23%</Text>
+                </View>
+              </View>
+            </Card>
 
-                {!isBlurred && (
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity style={styles.rejectButton}>
-                      <Ionicons name="close" size={20} color={COLORS.error} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.likeButton}>
-                      <Ionicons name="heart" size={20} color={COLORS.success} />
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+            <Card style={styles.insightCard}>
+              <View style={styles.insightRow}>
+                <View style={styles.insightIcon}>
+                  <Ionicons name="heart" size={24} color={COLORS.error} />
+                </View>
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightValue}>89</Text>
+                  <Text style={styles.insightLabel}>Likes Received (7 days)</Text>
+                </View>
+                <View style={styles.insightTrend}>
+                  <Ionicons name="trending-up" size={16} color={COLORS.success} />
+                  <Text style={styles.trendText}>+15%</Text>
+                </View>
+              </View>
+            </Card>
 
-        <View style={styles.insightsSection}>
-          <Text style={styles.sectionTitle}>Profile Insights</Text>
-          
-          <Card style={styles.insightCard}>
-            <View style={styles.insightRow}>
-              <View style={styles.insightIcon}>
-                <Ionicons name="eye" size={24} color={COLORS.primary} />
+            <Card style={styles.insightCard}>
+              <View style={styles.insightRow}>
+                <View style={styles.insightIcon}>
+                  <Ionicons name="star" size={24} color="#F59E0B" />
+                </View>
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightValue}>12</Text>
+                  <Text style={styles.insightLabel}>Super Likes Received</Text>
+                </View>
               </View>
-              <View style={styles.insightContent}>
-                <Text style={styles.insightValue}>156</Text>
-                <Text style={styles.insightLabel}>Profile Views (7 days)</Text>
-              </View>
-              <View style={styles.insightTrend}>
-                <Ionicons name="trending-up" size={16} color={COLORS.success} />
-                <Text style={styles.trendText}>+23%</Text>
-              </View>
-            </View>
-          </Card>
+            </Card>
 
-          <Card style={styles.insightCard}>
-            <View style={styles.insightRow}>
-              <View style={styles.insightIcon}>
-                <Ionicons name="heart" size={24} color={COLORS.error} />
+            {!isPremium && (
+              <View style={styles.premiumInsight}>
+                <Ionicons name="lock-closed" size={20} color={COLORS.textSecondary} />
+                <Text style={styles.premiumInsightText}>
+                  Upgrade to see who viewed your profile
+                </Text>
               </View>
-              <View style={styles.insightContent}>
-                <Text style={styles.insightValue}>89</Text>
-                <Text style={styles.insightLabel}>Likes Received (7 days)</Text>
-              </View>
-              <View style={styles.insightTrend}>
-                <Ionicons name="trending-up" size={16} color={COLORS.success} />
-                <Text style={styles.trendText}>+15%</Text>
-              </View>
-            </View>
-          </Card>
+            )}
+          </View>
+        )}
 
-          <Card style={styles.insightCard}>
-            <View style={styles.insightRow}>
-              <View style={styles.insightIcon}>
-                <Ionicons name="star" size={24} color="#F59E0B" />
-              </View>
-              <View style={styles.insightContent}>
-                <Text style={styles.insightValue}>12</Text>
-                <Text style={styles.insightLabel}>Super Likes Received</Text>
-              </View>
-            </View>
-          </Card>
-
-          {!isPremium && (
-            <View style={styles.premiumInsight}>
-              <Ionicons name="lock-closed" size={20} color={COLORS.textSecondary} />
-              <Text style={styles.premiumInsightText}>
-                Upgrade to see who viewed your profile
+        {activeTab === 'sent' && (
+          <View style={styles.sentInfoSection}>
+            <Card style={styles.infoCard}>
+              <Ionicons name="information-circle" size={24} color={COLORS.info} />
+              <Text style={styles.infoText}>
+                These are people you've liked. If they like you back, you'll match!
               </Text>
-            </View>
-          )}
-        </View>
+            </Card>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -256,18 +375,62 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.primary,
   },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.md,
+    gap: SPACING.sm,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.background,
+  },
+  activeTab: {
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+  },
+  tabText: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  activeTabText: {
+    color: COLORS.primary,
+  },
+  tabBadge: {
+    backgroundColor: COLORS.border,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  activeTabBadge: {
+    backgroundColor: COLORS.primary,
+  },
+  tabBadgeText: {
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  activeTabBadgeText: {
+    color: COLORS.white,
+  },
   premiumCard: {
     margin: SPACING.lg,
     alignItems: 'center',
-    backgroundColor: 'linear-gradient(135deg, #8B5CF6 0%, #D946EF 100%)',
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: COLORS.primary,
   },
   premiumIcon: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.md,
@@ -285,7 +448,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   premiumButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     width: '100%',
   },
   grid: {
@@ -319,6 +482,14 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     borderRadius: 10,
   },
+  sentBadge: {
+    position: 'absolute',
+    top: SPACING.sm,
+    left: SPACING.sm,
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.full,
+    padding: SPACING.xs,
+  },
   lockOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
@@ -346,6 +517,7 @@ const styles = StyleSheet.create({
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'space-around',
+    alignItems: 'center',
     paddingVertical: SPACING.sm,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
@@ -365,6 +537,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  undoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+  },
+  undoText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   insightsSection: {
     padding: SPACING.lg,
@@ -426,5 +610,22 @@ const styles = StyleSheet.create({
   premiumInsightText: {
     fontSize: FONTS.sizes.sm,
     color: COLORS.textSecondary,
+  },
+  sentInfoSection: {
+    padding: SPACING.lg,
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  infoText: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text,
+    lineHeight: 20,
   },
 });

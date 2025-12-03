@@ -5,7 +5,7 @@ export interface User {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
-  gender: 'male' | 'female' | 'other';
+  gender: 'male' | 'female';
   interestedIn: 'male' | 'female' | 'both';
   bio: string;
   photos: string[];
@@ -97,7 +97,7 @@ export interface RegistrationData {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
-  gender: 'male' | 'female' | 'other';
+  gender: 'male' | 'female';
   interestedIn: 'male' | 'female' | 'both';
   idDocument: VerificationDocument;
   selfie: LiveSelfie;

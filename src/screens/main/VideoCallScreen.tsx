@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Image,
   Animated,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,6 +14,7 @@ import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+import { WebRTCService, CallState } from '../../services/WebRTCService';
 
 type VideoCallScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -30,36 +32,97 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({
     isIncoming?: boolean;
   };
 
-  const [callStatus, setCallStatus] = useState<
-    'connecting' | 'ringing' | 'active' | 'ended'
-  >(isIncoming ? 'ringing' : 'connecting');
-  const [isMuted, setIsMuted] = useState(false);
-  const [isCameraOff, setIsCameraOff] = useState(false);
+  const [callState, setCallState] = useState<CallState>({
+    status: isIncoming ? 'ringing' : 'connecting',
+    isMuted: false,
+    isCameraOff: false,
+  });
   const [callDuration, setCallDuration] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [safetyAlertActive, setSafetyAlertActive] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const webRTCService = useRef<WebRTCService | null>(null);
+  const localVideoRef = useRef<CameraView>(null);
+  const remoteVideoRef = useRef<CameraView>(null);
 
+  // WebRTC configuration
+  const webrtcConfig = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      // In production, you'd want to add TURN servers here
+    ],
+    signalingUrl: 'ws://your-signaling-server.com/ws', // Replace with actual signaling server
+  };
+
+  // Initialize WebRTC when component mounts
   useEffect(() => {
-    if (callStatus === 'connecting') {
-      const timeout = setTimeout(() => {
-        setCallStatus('active');
-      }, 2000);
-      return () => clearTimeout(timeout);
+    initializeCall();
+    return () => {
+      // Cleanup on unmount
+      if (webRTCService.current) {
+        webRTCService.current.endCall();
+      }
+    };
+  }, []);
+
+  // Initialize the WebRTC call
+  const initializeCall = async () => {
+    try {
+      webRTCService.current = new WebRTCService(webrtcConfig);
+      
+      const currentUserId = 'current-user-id'; // Replace with actual user ID
+      const remoteUserId = 'remote-user-id'; // Replace with actual remote user ID
+      const callId = `call-${Date.now()}`;
+
+      await webRTCService.current.initialize(
+        callId,
+        currentUserId,
+        remoteUserId,
+        (newState) => {
+          setCallState(newState);
+          
+          // Handle call duration
+          if (newState.status === 'active' && callState.status !== 'active') {
+            setCallDuration(0);
+          }
+        },
+        (remoteStream) => {
+          console.log('Remote stream received:', remoteStream);
+          // Handle remote stream for video display
+        }
+      );
+
+      // Set camera references
+      if (localVideoRef.current) {
+        webRTCService.current.setCameraRef(localVideoRef);
+      }
+
+      if (!isIncoming) {
+        // Create offer for outgoing call
+        await webRTCService.current.createOffer();
+      }
+    } catch (error) {
+      console.error('Failed to initialize call:', error);
+      Alert.alert('Call Error', 'Failed to start video call. Please try again.');
     }
-  }, [callStatus]);
+  };
 
+  // Handle call duration timer
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (callStatus === 'active') {
+    let interval: any;
+    if (callState.status === 'active') {
       interval = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [callStatus]);
+  }, [callState.status]);
 
+  // Handle pulse animation for ringing state
   useEffect(() => {
-    if (callStatus === 'ringing') {
+    if (callState.status === 'ringing') {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
@@ -75,7 +138,7 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({
         ])
       ).start();
     }
-  }, [callStatus]);
+  }, [callState.status]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -84,23 +147,49 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({
   };
 
   const handleEndCall = () => {
-    setCallStatus('ended');
+    if (webRTCService.current) {
+      webRTCService.current.endCall();
+    }
     setTimeout(() => navigation.goBack(), 1000);
   };
 
   const handleAcceptCall = async () => {
     if (!permission?.granted) {
-      await requestPermission();
+      const newPermission = await requestPermission();
+      if (!newPermission?.granted) {
+        Alert.alert('Permission Required', 'Camera and microphone access is required for video calls.');
+        return;
+      }
     }
-    setCallStatus('active');
+    // WebRTC initialization is already handled in useEffect
   };
 
   const handleDeclineCall = () => {
-    setCallStatus('ended');
+    if (webRTCService.current) {
+      webRTCService.current.endCall();
+    }
     navigation.goBack();
   };
 
-  if (callStatus === 'ringing' && isIncoming) {
+  const handleToggleMute = () => {
+    if (webRTCService.current) {
+      webRTCService.current.toggleMute();
+    }
+  };
+
+  const handleToggleCamera = () => {
+    if (webRTCService.current) {
+      webRTCService.current.toggleCamera();
+    }
+  };
+
+  const handleSwitchCamera = async () => {
+    if (webRTCService.current) {
+      await webRTCService.current.switchCamera();
+    }
+  };
+
+  if (callState.status === 'ringing' && isIncoming) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.incomingCallContainer}>
@@ -137,20 +226,31 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      {callStatus === 'active' && !isCameraOff && permission?.granted ? (
-        <CameraView style={styles.remoteVideo} facing="front" />
+      {callState.status === 'active' && !callState.isCameraOff && permission?.granted ? (
+        <CameraView 
+          style={styles.remoteVideo} 
+          facing="front"
+          ref={remoteVideoRef}
+        />
       ) : (
         <View style={styles.noVideoContainer}>
           <Image source={{ uri: userPhoto }} style={styles.noVideoAvatar} />
-          {callStatus === 'connecting' && (
+          {callState.status === 'connecting' && (
             <Text style={styles.connectingText}>Connecting...</Text>
+          )}
+          {callState.error && (
+            <Text style={styles.errorText}>{callState.error}</Text>
           )}
         </View>
       )}
 
       <View style={styles.localVideoContainer}>
-        {!isCameraOff && permission?.granted ? (
-          <CameraView style={styles.localVideo} facing="front" />
+        {!callState.isCameraOff && permission?.granted ? (
+          <CameraView 
+            style={styles.localVideo} 
+            facing="front"
+            ref={localVideoRef}
+          />
         ) : (
           <View style={styles.cameraOffPlaceholder}>
             <Ionicons name="videocam-off" size={24} color={COLORS.white} />
@@ -162,31 +262,43 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({
         <View style={styles.topBar}>
           <View style={styles.userInfo}>
             <Text style={styles.userName}>{userName}</Text>
-            {callStatus === 'active' && (
+            {callState.status === 'active' && (
               <Text style={styles.duration}>{formatDuration(callDuration)}</Text>
             )}
+          </View>
+          
+          {/* Trust & Safety Indicators */}
+          <View style={styles.safetyIndicators}>
+            <View style={styles.trustBadge}>
+              <Ionicons name="shield-checkmark" size={16} color={COLORS.success} />
+              <Text style={styles.trustText}>95% Trusted</Text>
+            </View>
+            <View style={styles.recordingIndicator}>
+              <Ionicons name="ellipse" size={8} color={COLORS.error} />
+              <Text style={styles.recordingText}>Recording</Text>
+            </View>
           </View>
         </View>
 
         <View style={styles.controlsContainer}>
           <View style={styles.controls}>
             <TouchableOpacity
-              style={[styles.controlButton, isMuted && styles.controlButtonActive]}
-              onPress={() => setIsMuted(!isMuted)}
+              style={[styles.controlButton, callState.isMuted && styles.controlButtonActive]}
+              onPress={handleToggleMute}
             >
               <Ionicons
-                name={isMuted ? 'mic-off' : 'mic'}
+                name={callState.isMuted ? 'mic-off' : 'mic'}
                 size={24}
                 color={COLORS.white}
               />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.controlButton, isCameraOff && styles.controlButtonActive]}
-              onPress={() => setIsCameraOff(!isCameraOff)}
+              style={[styles.controlButton, callState.isCameraOff && styles.controlButtonActive]}
+              onPress={handleToggleCamera}
             >
               <Ionicons
-                name={isCameraOff ? 'videocam-off' : 'videocam'}
+                name={callState.isCameraOff ? 'videocam-off' : 'videocam'}
                 size={24}
                 color={COLORS.white}
               />
@@ -199,12 +311,19 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({
               <Ionicons name="call" size={28} color={COLORS.white} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.controlButton}>
+            <TouchableOpacity style={styles.controlButton} onPress={handleSwitchCamera}>
               <Ionicons name="camera-reverse" size={24} color={COLORS.white} />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.controlButton}>
               <Ionicons name="chatbubble" size={24} color={COLORS.white} />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.controlButton, styles.safetyButton]}
+              onPress={() => setSafetyAlertActive(!safetyAlertActive)}
+            >
+              <Ionicons name="shield" size={24} color={COLORS.white} />
             </TouchableOpacity>
           </View>
         </View>
@@ -237,6 +356,11 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: FONTS.sizes.lg,
   },
+  errorText: {
+    color: COLORS.error,
+    fontSize: FONTS.sizes.md,
+    marginTop: SPACING.sm,
+  },
   localVideoContainer: {
     position: 'absolute',
     top: 100,
@@ -267,6 +391,40 @@ const styles = StyleSheet.create({
   },
   userInfo: {
     alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  safetyIndicators: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: SPACING.md,
+  },
+  trustBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+    gap: SPACING.xs,
+  },
+  trustText: {
+    color: COLORS.success,
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '600',
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+    gap: SPACING.xs,
+  },
+  recordingText: {
+    color: COLORS.error,
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '600',
   },
   userName: {
     fontSize: FONTS.sizes.xl,
@@ -304,6 +462,9 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     backgroundColor: COLORS.error,
     transform: [{ rotate: '135deg' }],
+  },
+  safetyButton: {
+    backgroundColor: COLORS.warning,
   },
   incomingCallContainer: {
     flex: 1,

@@ -7,6 +7,8 @@ import userRoutes from './routes/users';
 import matchRoutes from './routes/matches';
 import messageRoutes from './routes/messages';
 import verificationRoutes from './routes/verification';
+import voiceNotesRoutes from './routes/voiceNotes';
+import eventsRoutes from './routes/events';
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 
@@ -28,6 +30,8 @@ app.use('/api/verification', verificationRoutes);
 app.use('/api/users', authMiddleware, userRoutes);
 app.use('/api/matches', authMiddleware, matchRoutes);
 app.use('/api/messages', authMiddleware, messageRoutes);
+app.use('/api/voice-notes', authMiddleware, voiceNotesRoutes);
+app.use('/api/events', authMiddleware, eventsRoutes);
 
 app.use(errorHandler);
 

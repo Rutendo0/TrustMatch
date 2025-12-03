@@ -11,14 +11,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Input } from '../../components/common';
+import { Button, Input, DatePicker } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 
 type RegisterScreenProps = {
   navigation: NativeStackNavigationProp<any>;
 };
 
-type Step = 'basic' | 'personal' | 'verification';
+type Step = 'basic' | 'personal' | 'verification' | 'photos';
 
 export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   const [currentStep, setCurrentStep] = useState<Step>('basic');
@@ -32,7 +32,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
     firstName: '',
     lastName: '',
     dateOfBirth: '',
-    gender: '' as 'male' | 'female' | 'other' | '',
+    gender: '' as 'male' | 'female' | '',
     interestedIn: '' as 'male' | 'female' | 'both' | '',
   });
   
@@ -85,6 +85,46 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
     
     if (!formData.dateOfBirth) {
       newErrors.dateOfBirth = 'Date of birth is required';
+    } else {
+      // Simple validation - just check basic format and age
+      const dateParts = formData.dateOfBirth.split('/');
+      if (dateParts.length !== 3) {
+        newErrors.dateOfBirth = 'Please select a valid date';
+        return;
+      }
+      
+      const day = parseInt(dateParts[0], 10);
+      const month = parseInt(dateParts[1], 10);
+      const year = parseInt(dateParts[2], 10);
+      
+      // Basic range checks
+      if (isNaN(day) || isNaN(month) || isNaN(year) || 
+          day < 1 || day > 31 || 
+          month < 1 || month > 12 || 
+          year < 1950 || year > 2010) {
+        newErrors.dateOfBirth = 'Please select a valid date';
+        return;
+      }
+      
+      // Create date and check if it's valid
+      const birthDate = new Date(year, month - 1, day);
+      const today = new Date();
+      
+      // Verify the date makes sense
+      if (birthDate > today) {
+        newErrors.dateOfBirth = 'Birth date cannot be in the future';
+        return;
+      }
+      
+      // Calculate age
+      let age = today.getFullYear() - year;
+      if (month - 1 > today.getMonth() || (month - 1 === today.getMonth() && day > today.getDate())) {
+        age--;
+      }
+      
+      if (age < 18) {
+        newErrors.dateOfBirth = 'You must be at least 18 years old';
+      }
     }
     
     if (!formData.gender) {
@@ -185,19 +225,16 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
         </View>
       </View>
 
-      <Input
+      <DatePicker
         label="Date of Birth"
-        placeholder="DD/MM/YYYY"
         value={formData.dateOfBirth}
-        onChangeText={(value) => updateFormData('dateOfBirth', value)}
-        keyboardType="numeric"
-        icon="calendar"
+        onDateChange={(date) => updateFormData('dateOfBirth', date)}
         error={errors.dateOfBirth}
       />
 
       <Text style={styles.sectionLabel}>I am a</Text>
       <View style={styles.optionRow}>
-        {(['male', 'female', 'other'] as const).map((gender) => (
+        {(['male', 'female'] as const).map((gender) => (
           <TouchableOpacity
             key={gender}
             style={[
@@ -245,7 +282,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
     </>
   );
 
-  const steps = ['basic', 'personal', 'verification'];
+  const steps = ['basic', 'personal', 'verification', 'photos'];
   const currentStepIndex = steps.indexOf(currentStep);
 
   return (

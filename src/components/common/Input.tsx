@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+import { normalize, MIN_TOUCH_SIZE } from '../../hooks/useResponsive';
 
 interface InputProps {
   label?: string;
@@ -24,6 +25,9 @@ interface InputProps {
   multiline?: boolean;
   numberOfLines?: number;
   style?: ViewStyle;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  maxLength?: number;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -40,6 +44,9 @@ export const Input: React.FC<InputProps> = ({
   multiline = false,
   numberOfLines = 1,
   style,
+  accessibilityLabel,
+  accessibilityHint,
+  maxLength,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -58,7 +65,7 @@ export const Input: React.FC<InputProps> = ({
         {icon && (
           <Ionicons
             name={icon}
-            size={20}
+            size={normalize(20)}
             color={isFocused ? COLORS.primary : COLORS.textSecondary}
             style={styles.icon}
           />
@@ -77,6 +84,9 @@ export const Input: React.FC<InputProps> = ({
           editable={!disabled}
           multiline={multiline}
           numberOfLines={numberOfLines}
+          accessibilityLabel={accessibilityLabel || label}
+          accessibilityHint={accessibilityHint}
+          maxLength={maxLength}
         />
         {secureTextEntry && (
           <TouchableOpacity
@@ -85,7 +95,7 @@ export const Input: React.FC<InputProps> = ({
           >
             <Ionicons
               name={showPassword ? 'eye-off' : 'eye'}
-              size={20}
+              size={normalize(20)}
               color={COLORS.textSecondary}
             />
           </TouchableOpacity>
@@ -98,13 +108,13 @@ export const Input: React.FC<InputProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: SPACING.md,
+    marginBottom: normalize(SPACING.md),
   },
   label: {
-    fontSize: FONTS.sizes.sm,
+    fontSize: normalize(FONTS.sizes.sm),
     fontWeight: '600',
     color: COLORS.text,
-    marginBottom: SPACING.xs,
+    marginBottom: normalize(SPACING.xs),
   },
   inputContainer: {
     flexDirection: 'row',
@@ -113,7 +123,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: normalize(SPACING.md),
+    minHeight: MIN_TOUCH_SIZE,
   },
   focused: {
     borderColor: COLORS.primary,
@@ -127,24 +138,29 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   icon: {
-    marginRight: SPACING.sm,
+    marginRight: normalize(SPACING.sm),
   },
   input: {
     flex: 1,
-    paddingVertical: SPACING.md,
-    fontSize: FONTS.sizes.md,
+    paddingVertical: normalize(SPACING.md),
+    fontSize: normalize(FONTS.sizes.md),
     color: COLORS.text,
+    minHeight: MIN_TOUCH_SIZE,
   },
   multiline: {
-    minHeight: 100,
+    minHeight: normalize(100),
     textAlignVertical: 'top',
   },
   eyeIcon: {
-    padding: SPACING.xs,
+    padding: normalize(SPACING.xs),
+    minWidth: MIN_TOUCH_SIZE,
+    minHeight: MIN_TOUCH_SIZE,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   errorText: {
-    fontSize: FONTS.sizes.xs,
+    fontSize: normalize(FONTS.sizes.xs),
     color: COLORS.error,
-    marginTop: SPACING.xs,
+    marginTop: normalize(SPACING.xs),
   },
 });

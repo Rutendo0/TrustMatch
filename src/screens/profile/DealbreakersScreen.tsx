@@ -101,7 +101,7 @@ export const DealbreakersScreen: React.FC<DealbreakersScreenProps> = ({
   };
 
   const handleSave = () => {
-    console.log('Saving dealbreakers:', dealbreakers);
+    // Saving dealbreakers functionality
     navigation.goBack();
   };
 

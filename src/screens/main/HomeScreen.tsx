@@ -1,24 +1,18 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Dimensions,
   Image,
   TouchableOpacity,
-  Animated,
-  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VerifiedBadge } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
-
-const { width, height } = Dimensions.get('window');
-const CARD_WIDTH = width - SPACING.lg * 2;
-const CARD_HEIGHT = height * 0.65;
-const SWIPE_THRESHOLD = width * 0.25;
+import { useResponsive, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 interface Profile {
   id: string;
@@ -28,8 +22,24 @@ interface Profile {
   distance: string;
   photos: string[];
   isVerified: boolean;
+  trustScore: number;
+  compatibility: number;
+  personalityType: string;
   interests: string[];
+  safetyFeatures: string[];
+  verificationBadges: string[];
 }
+
+// Current user profile data
+const CURRENT_USER = {
+  id: 'current-user',
+  name: 'Alex',
+  age: 28,
+  photos: [
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+  ],
+  isVerified: true,
+};
 
 const MOCK_PROFILES: Profile[] = [
   {
@@ -38,9 +48,18 @@ const MOCK_PROFILES: Profile[] = [
     age: 28,
     bio: 'Coffee enthusiast ☕ | Love hiking and outdoor adventures | Looking for genuine connections',
     distance: '3 km away',
-    photos: ['https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400'],
+    photos: [
+      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
+      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400'
+    ],
     isVerified: true,
+    trustScore: 95,
+    compatibility: 87,
+    personalityType: 'ENFP',
     interests: ['Travel', 'Photography', 'Hiking'],
+    safetyFeatures: ['Video Verified', 'ID Checked', 'Background Check'],
+    verificationBadges: ['Identity', 'Selfie', 'Employment'],
   },
   {
     id: '2',
@@ -48,9 +67,17 @@ const MOCK_PROFILES: Profile[] = [
     age: 25,
     bio: 'Artist and dreamer 🎨 | Dog mom | Here to find my person',
     distance: '5 km away',
-    photos: ['https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400'],
+    photos: [
+      'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400',
+      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400'
+    ],
     isVerified: true,
+    trustScore: 92,
+    compatibility: 89,
+    personalityType: 'INFP',
     interests: ['Art', 'Music', 'Dogs'],
+    safetyFeatures: ['Video Verified', 'ID Checked', 'Social Media'],
+    verificationBadges: ['Identity', 'Selfie', 'Education'],
   },
   {
     id: '3',
@@ -58,175 +85,179 @@ const MOCK_PROFILES: Profile[] = [
     age: 30,
     bio: 'Foodie exploring the city 🍕 | Tech professional | Looking for someone to share adventures with',
     distance: '8 km away',
-    photos: ['https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400'],
+    photos: [
+      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400',
+      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
+      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400'
+    ],
     isVerified: true,
+    trustScore: 98,
+    compatibility: 91,
+    personalityType: 'ENTJ',
     interests: ['Food', 'Technology', 'Travel'],
+    safetyFeatures: ['Video Verified', 'ID Checked', 'Employment', 'Background Check'],
+    verificationBadges: ['Identity', 'Selfie', 'Employment', 'Education'],
   },
 ];
 
-export const HomeScreen: React.FC = () => {
+type HomeScreenProps = {
+  navigation: NativeStackNavigationProp<any>;
+};
+
+export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
+  const { width, height, wp, hp, normalize, isLandscape, isTablet } = useResponsive();
+  
+  const cardDimensions = useMemo(() => {
+    const cardHeight = isLandscape ? hp(75) : hp(60);
+    const cardWidth = isLandscape 
+      ? Math.min(wp(50), height * 0.65)
+      : wp(100) - SPACING.lg * 2;
+    return { cardHeight, cardWidth };
+  }, [width, height, isLandscape, wp, hp]);
+
+  const { cardHeight, cardWidth } = cardDimensions;
+
+  const responsiveFonts = useMemo(() => ({
+    cardName: normalize(24),
+    cardDistance: normalize(14),
+    cardBio: normalize(16),
+    interestText: normalize(12),
+    logoText: normalize(20),
+    emptyTitle: normalize(20),
+    emptySubtitle: normalize(16),
+  }), [normalize]);
+
+  const responsiveIconSizes = useMemo(() => ({
+    actionLarge: normalize(30),
+    actionMedium: normalize(28),
+    location: normalize(14),
+    emptyState: normalize(80),
+    filter: normalize(24),
+    arrow: normalize(24),
+    photoIndicator: normalize(8),
+  }), [normalize]);
+
+  const actionButtonSize = useMemo(() => Math.max(MIN_TOUCH_SIZE, normalize(60)), [normalize]);
+
   const [profiles, setProfiles] = useState(MOCK_PROFILES);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const position = useRef(new Animated.ValueXY()).current;
-  const rotate = position.x.interpolate({
-    inputRange: [-width / 2, 0, width / 2],
-    outputRange: ['-15deg', '0deg', '15deg'],
-    extrapolate: 'clamp',
-  });
-
-  const likeOpacity = position.x.interpolate({
-    inputRange: [0, SWIPE_THRESHOLD],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-
-  const nopeOpacity = position.x.interpolate({
-    inputRange: [-SWIPE_THRESHOLD, 0],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  const nextCardScale = position.x.interpolate({
-    inputRange: [-width / 2, 0, width / 2],
-    outputRange: [1, 0.95, 1],
-    extrapolate: 'clamp',
-  });
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, gesture) => {
-        position.setValue({ x: gesture.dx, y: gesture.dy });
-      },
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dx > SWIPE_THRESHOLD) {
-          swipeRight();
-        } else if (gesture.dx < -SWIPE_THRESHOLD) {
-          swipeLeft();
-        } else {
-          resetPosition();
-        }
-      },
-    })
-  ).current;
-
-  const resetPosition = () => {
-    Animated.spring(position, {
-      toValue: { x: 0, y: 0 },
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const swipeRight = () => {
-    Animated.timing(position, {
-      toValue: { x: width + 100, y: 0 },
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => handleSwipeComplete('like'));
-  };
-
-  const swipeLeft = () => {
-    Animated.timing(position, {
-      toValue: { x: -width - 100, y: 0 },
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => handleSwipeComplete('dislike'));
-  };
-
-  const handleSwipeComplete = (action: 'like' | 'dislike') => {
-    position.setValue({ x: 0, y: 0 });
-    setCurrentIndex((prev) => prev + 1);
-    console.log(`${action} on profile:`, profiles[currentIndex]?.name);
-  };
-
-  const handleActionButton = (action: 'dislike' | 'superlike' | 'like') => {
-    if (action === 'like') {
-      swipeRight();
-    } else if (action === 'dislike') {
-      swipeLeft();
-    } else {
-      console.log('Superlike!');
-      swipeRight();
-    }
-  };
-
-  const renderCard = (profile: Profile, index: number) => {
-    if (index < currentIndex) return null;
-
-    const isCurrentCard = index === currentIndex;
-    const cardStyle = isCurrentCard
-      ? {
-          transform: [
-            { translateX: position.x },
-            { translateY: position.y },
-            { rotate },
-          ],
-        }
-      : {
-          transform: [{ scale: nextCardScale }],
-        };
-
-    return (
-      <Animated.View
-        key={profile.id}
-        style={[
-          styles.card,
-          cardStyle,
-          { zIndex: profiles.length - index },
-        ]}
-        {...(isCurrentCard ? panResponder.panHandlers : {})}
-      >
-        <Image
-          source={{ uri: profile.photos[0] }}
-          style={styles.cardImage}
-        />
-        
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.8)']}
-          style={styles.cardGradient}
-        />
-
-        {isCurrentCard && (
-          <>
-            <Animated.View style={[styles.likeLabel, { opacity: likeOpacity }]}>
-              <Text style={styles.likeLabelText}>LIKE</Text>
-            </Animated.View>
-            <Animated.View style={[styles.nopeLabel, { opacity: nopeOpacity }]}>
-              <Text style={styles.nopeLabelText}>NOPE</Text>
-            </Animated.View>
-          </>
-        )}
-
-        <View style={styles.cardInfo}>
-          <View style={styles.nameRow}>
-            <Text style={styles.cardName}>{profile.name}, {profile.age}</Text>
-            {profile.isVerified && <VerifiedBadge isVerified size="medium" />}
-          </View>
-          <Text style={styles.cardDistance}>
-            <Ionicons name="location" size={14} color={COLORS.white} /> {profile.distance}
-          </Text>
-          <Text style={styles.cardBio} numberOfLines={2}>{profile.bio}</Text>
-          <View style={styles.interestsRow}>
-            {profile.interests.slice(0, 3).map((interest, i) => (
-              <View key={i} style={styles.interestTag}>
-                <Text style={styles.interestText}>{interest}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      </Animated.View>
-    );
-  };
+  const [likedProfiles, setLikedProfiles] = useState<string[]>([]);
+  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
 
   const currentProfile = profiles[currentIndex];
 
+  const handleLike = () => {
+    if (currentProfile) {
+      setLikedProfiles(prev => [...prev, currentProfile.id]);
+      // Profile liked successfully
+    }
+  };
+
+  const goToNext = () => {
+    if (currentIndex < profiles.length - 1) {
+      setCurrentIndex(prev => prev + 1);
+      setCurrentPhotoIndex(0);
+    }
+  };
+
+  const goToPrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(prev => prev - 1);
+      setCurrentPhotoIndex(0);
+    }
+  };
+
+  const viewFullProfile = () => {
+    if (currentProfile) {
+      navigation.navigate('ProfileDetail', { profile: currentProfile });
+    }
+  };
+
+  const nextPhoto = () => {
+    if (currentProfile && currentPhotoIndex < currentProfile.photos.length - 1) {
+      setCurrentPhotoIndex(prev => prev + 1);
+    }
+  };
+
+  const previousPhoto = () => {
+    if (currentPhotoIndex > 0) {
+      setCurrentPhotoIndex(prev => prev - 1);
+    }
+  };
+
+  const dynamicStyles = useMemo(() => StyleSheet.create({
+    card: {
+      width: cardWidth,
+      height: cardHeight,
+      borderRadius: BORDER_RADIUS.xl,
+      overflow: 'hidden',
+      backgroundColor: COLORS.white,
+      ...SHADOWS.large,
+    },
+    cardName: {
+      fontSize: responsiveFonts.cardName,
+      fontWeight: 'bold',
+      color: COLORS.white,
+    },
+    cardDistance: {
+      fontSize: responsiveFonts.cardDistance,
+      color: COLORS.white,
+      opacity: 0.9,
+      marginBottom: SPACING.sm,
+    },
+    cardBio: {
+      fontSize: responsiveFonts.cardBio,
+      color: COLORS.white,
+      opacity: 0.9,
+      marginBottom: SPACING.sm,
+    },
+    interestText: {
+      fontSize: responsiveFonts.interestText,
+      color: COLORS.white,
+      fontWeight: '500',
+    },
+    logoText: {
+      fontSize: responsiveFonts.logoText,
+      fontWeight: 'bold',
+      color: COLORS.primary,
+    },
+    headerButton: {
+      width: Math.max(MIN_TOUCH_SIZE, 40),
+      height: Math.max(MIN_TOUCH_SIZE, 40),
+      borderRadius: Math.max(MIN_TOUCH_SIZE, 40) / 2,
+      backgroundColor: COLORS.white,
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...SHADOWS.small,
+    },
+    profilePic: {
+      width: Math.max(MIN_TOUCH_SIZE, 40),
+      height: Math.max(MIN_TOUCH_SIZE, 40),
+      borderRadius: Math.max(MIN_TOUCH_SIZE, 40) / 2,
+      backgroundColor: COLORS.border,
+    },
+    emptyTitle: {
+      fontSize: responsiveFonts.emptyTitle,
+      fontWeight: 'bold',
+      color: COLORS.text,
+      marginTop: SPACING.lg,
+    },
+    emptySubtitle: {
+      fontSize: responsiveFonts.emptySubtitle,
+      color: COLORS.textSecondary,
+      textAlign: 'center',
+      marginTop: SPACING.sm,
+    },
+  }), [cardWidth, cardHeight, responsiveFonts]);
+
   if (currentIndex >= profiles.length) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.emptyState}>
-          <Ionicons name="heart-dislike" size={80} color={COLORS.textLight} />
-          <Text style={styles.emptyTitle}>No More Profiles</Text>
-          <Text style={styles.emptySubtitle}>
+          <Ionicons name="heart-dislike" size={responsiveIconSizes.emptyState} color={COLORS.textLight} />
+          <Text style={dynamicStyles.emptyTitle}>No More Profiles</Text>
+          <Text style={dynamicStyles.emptySubtitle}>
             Check back later for new matches in your area
           </Text>
         </View>
@@ -235,47 +266,182 @@ export const HomeScreen: React.FC = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Image
-          source={{ uri: 'https://via.placeholder.com/40' }}
-          style={styles.profilePic}
-        />
+        <TouchableOpacity 
+          hitSlop={HIT_SLOP}
+          onPress={() => navigation.navigate('Profile')}
+        >
+          <View style={styles.profilePicContainer}>
+            <Image
+              source={{ uri: CURRENT_USER.photos[0] }}
+              style={dynamicStyles.profilePic}
+            />
+            {CURRENT_USER.isVerified && (
+              <View style={styles.verifiedBadge}>
+                <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
         <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>TrustMatch</Text>
+          <Text style={dynamicStyles.logoText}>TrustMatch</Text>
         </View>
-        <TouchableOpacity style={styles.filterButton}>
-          <Ionicons name="options" size={24} color={COLORS.text} />
+        <TouchableOpacity 
+          style={dynamicStyles.headerButton} 
+          hitSlop={HIT_SLOP}
+          onPress={() => navigation.navigate('Filters')}
+        >
+          <Ionicons name="options" size={responsiveIconSizes.filter} color={COLORS.text} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.cardsContainer}>
-        {profiles.slice(currentIndex, currentIndex + 2).reverse().map((profile, i) =>
-          renderCard(profile, currentIndex + (1 - i))
-        )}
+      <View style={styles.contentContainer}>
+        {/* Profile Card */}
+        <TouchableOpacity 
+          style={[dynamicStyles.card, styles.profileCard]} 
+          onPress={viewFullProfile}
+          activeOpacity={0.9}
+        >
+          <Image
+            source={{ uri: currentProfile.photos[currentPhotoIndex] }}
+            style={styles.cardImage}
+          />
+          
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.8)']}
+            style={styles.cardGradient}
+          />
+
+          {/* Photo Navigation Indicators */}
+          {currentProfile.photos.length > 1 && (
+            <View style={styles.photoIndicators}>
+              {currentProfile.photos.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.photoIndicator,
+                    index === currentPhotoIndex && styles.activePhotoIndicator
+                  ]}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* Photo Navigation Arrows */}
+          {currentProfile.photos.length > 1 && (
+            <>
+              {currentPhotoIndex > 0 && (
+                <TouchableOpacity 
+                  style={styles.photoArrowLeft} 
+                  onPress={previousPhoto}
+                  hitSlop={HIT_SLOP}
+                >
+                  <Ionicons name="chevron-back" size={responsiveIconSizes.arrow} color={COLORS.white} />
+                </TouchableOpacity>
+              )}
+              {currentPhotoIndex < currentProfile.photos.length - 1 && (
+                <TouchableOpacity 
+                  style={styles.photoArrowRight} 
+                  onPress={nextPhoto}
+                  hitSlop={HIT_SLOP}
+                >
+                  <Ionicons name="chevron-forward" size={responsiveIconSizes.arrow} color={COLORS.white} />
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
+          <View style={styles.cardInfo}>
+            <View style={styles.nameRow}>
+              <Text style={dynamicStyles.cardName}>{currentProfile.name}, {currentProfile.age}</Text>
+              {currentProfile.isVerified && <VerifiedBadge isVerified size="medium" />}
+            </View>
+            
+            <View style={styles.trustRow}>
+              <View style={styles.trustScore}>
+                <Ionicons name="shield-checkmark" size={16} color={COLORS.trustScore} />
+                <Text style={styles.trustScoreText}>{currentProfile.trustScore}% Trusted</Text>
+              </View>
+              <View style={styles.compatibility}>
+                <Ionicons name="heart" size={16} color={COLORS.secondary} />
+                <Text style={styles.compatibilityText}>{currentProfile.compatibility}% Match</Text>
+              </View>
+            </View>
+            
+            <Text style={dynamicStyles.cardDistance}>
+              <Ionicons name="location" size={responsiveIconSizes.location} color={COLORS.white} /> {currentProfile.distance}
+            </Text>
+            
+            <Text style={styles.personalityType}>{currentProfile.personalityType}</Text>
+            
+            <Text style={dynamicStyles.cardBio} numberOfLines={2}>{currentProfile.bio}</Text>
+            
+            <View style={styles.safetyRow}>
+              {currentProfile.safetyFeatures.slice(0, 3).map((feature, i) => (
+                <View key={i} style={styles.safetyBadge}>
+                  <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
+                  <Text style={styles.safetyText}>{feature}</Text>
+                </View>
+              ))}
+            </View>
+            
+            <View style={styles.interestsRow}>
+              {currentProfile.interests.slice(0, 3).map((interest, i) => (
+                <View key={i} style={styles.interestTag}>
+                  <Text style={dynamicStyles.interestText}>{interest}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.actionsContainer}>
+      {/* Navigation and Action Buttons */}
+      <View style={styles.actionContainer}>
+        {/* Previous Button */}
         <TouchableOpacity
-          style={[styles.actionButton, styles.dislikeButton]}
-          onPress={() => handleActionButton('dislike')}
+          style={[styles.navButton, styles.previousButton]}
+          onPress={goToPrevious}
+          disabled={currentIndex === 0}
+          hitSlop={HIT_SLOP}
         >
-          <Ionicons name="close" size={30} color={COLORS.error} />
+          <Ionicons 
+            name="chevron-back" 
+            size={responsiveIconSizes.actionLarge} 
+            color={currentIndex === 0 ? COLORS.textLight : COLORS.text} 
+          />
         </TouchableOpacity>
 
+        {/* Like Button */}
         <TouchableOpacity
-          style={[styles.actionButton, styles.superlikeButton]}
-          onPress={() => handleActionButton('superlike')}
+          style={[styles.likeButton]}
+          onPress={handleLike}
+          hitSlop={HIT_SLOP}
         >
-          <Ionicons name="star" size={28} color="#3B82F6" />
+          <Ionicons name="heart" size={responsiveIconSizes.actionLarge} color={COLORS.white} />
         </TouchableOpacity>
 
+        {/* Next Button */}
         <TouchableOpacity
-          style={[styles.actionButton, styles.likeButton]}
-          onPress={() => handleActionButton('like')}
+          style={[styles.navButton, styles.nextButton]}
+          onPress={goToNext}
+          disabled={currentIndex === profiles.length - 1}
+          hitSlop={HIT_SLOP}
         >
-          <Ionicons name="heart" size={30} color={COLORS.success} />
+          <Ionicons 
+            name="chevron-forward" 
+            size={responsiveIconSizes.actionLarge} 
+            color={currentIndex === profiles.length - 1 ? COLORS.textLight : COLORS.text} 
+          />
         </TouchableOpacity>
+      </View>
+
+      {/* Profile Counter */}
+      <View style={styles.counterContainer}>
+        <Text style={styles.counterText}>
+          {currentIndex + 1} of {profiles.length}
+        </Text>
       </View>
     </SafeAreaView>
   );
@@ -293,43 +459,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
   },
-  profilePic: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.border,
-  },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  logoText: {
-    fontSize: FONTS.sizes.xl,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
-  filterButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.small,
-  },
-  cardsContainer: {
+  contentContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: SPACING.lg,
   },
-  card: {
-    position: 'absolute',
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
-    borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
-    backgroundColor: COLORS.white,
-    ...SHADOWS.large,
+  profileCard: {
+    position: 'relative',
   },
   cardImage: {
     width: '100%',
@@ -343,35 +484,48 @@ const styles = StyleSheet.create({
     right: 0,
     height: '50%',
   },
-  likeLabel: {
+  photoIndicators: {
     position: 'absolute',
-    top: 50,
-    left: 30,
-    padding: SPACING.md,
-    borderWidth: 3,
-    borderColor: COLORS.success,
-    borderRadius: BORDER_RADIUS.md,
-    transform: [{ rotate: '-20deg' }],
+    bottom: 20,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
   },
-  likeLabelText: {
-    fontSize: FONTS.sizes.xxl,
-    fontWeight: 'bold',
-    color: COLORS.success,
+  photoIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
   },
-  nopeLabel: {
+  activePhotoIndicator: {
+    backgroundColor: COLORS.white,
+  },
+  photoArrowLeft: {
     position: 'absolute',
-    top: 50,
-    right: 30,
-    padding: SPACING.md,
-    borderWidth: 3,
-    borderColor: COLORS.error,
-    borderRadius: BORDER_RADIUS.md,
-    transform: [{ rotate: '20deg' }],
+    left: 16,
+    top: '50%',
+    transform: [{ translateY: -20 }],
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  nopeLabelText: {
-    fontSize: FONTS.sizes.xxl,
-    fontWeight: 'bold',
-    color: COLORS.error,
+  photoArrowRight: {
+    position: 'absolute',
+    right: 16,
+    top: '50%',
+    transform: [{ translateY: -20 }],
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardInfo: {
     position: 'absolute',
@@ -386,22 +540,68 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     marginBottom: SPACING.xs,
   },
-  cardName: {
-    fontSize: FONTS.sizes.xxl,
-    fontWeight: 'bold',
-    color: COLORS.white,
+  trustRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginBottom: SPACING.xs,
   },
-  cardDistance: {
-    fontSize: FONTS.sizes.sm,
+  trustScore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: 'rgba(99, 102, 241, 0.9)',
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  trustScoreText: {
     color: COLORS.white,
-    opacity: 0.9,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  compatibility: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: 'rgba(236, 72, 153, 0.9)',
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  compatibilityText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  personalityType: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: SPACING.xs,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+    alignSelf: 'flex-start',
+  },
+  safetyRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
     marginBottom: SPACING.sm,
   },
-  cardBio: {
-    fontSize: FONTS.sizes.md,
+  safetyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  safetyText: {
     color: COLORS.white,
-    opacity: 0.9,
-    marginBottom: SPACING.sm,
+    fontSize: 10,
+    fontWeight: '600',
   },
   interestsRow: {
     flexDirection: 'row',
@@ -413,19 +613,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
   },
-  interestText: {
-    fontSize: FONTS.sizes.xs,
-    color: COLORS.white,
-    fontWeight: '500',
-  },
-  actionsContainer: {
+  actionContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: SPACING.xl,
-    gap: SPACING.lg,
+    paddingVertical: SPACING.lg,
+    gap: SPACING.xl,
   },
-  actionButton: {
+  navButton: {
     width: 60,
     height: 60,
     borderRadius: 30,
@@ -434,20 +629,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...SHADOWS.medium,
   },
-  dislikeButton: {
+  previousButton: {
     borderWidth: 2,
-    borderColor: COLORS.error,
+    borderColor: COLORS.border,
   },
-  superlikeButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  nextButton: {
     borderWidth: 2,
-    borderColor: '#3B82F6',
+    borderColor: COLORS.border,
   },
   likeButton: {
-    borderWidth: 2,
-    borderColor: COLORS.success,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: COLORS.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOWS.large,
+  },
+  counterContainer: {
+    alignItems: 'center',
+    paddingBottom: SPACING.lg,
+  },
+  counterText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   emptyState: {
     flex: 1,
@@ -455,16 +661,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: SPACING.xl,
   },
-  emptyTitle: {
-    fontSize: FONTS.sizes.xl,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginTop: SPACING.lg,
+  profilePicContainer: {
+    position: 'relative',
   },
-  emptySubtitle: {
-    fontSize: FONTS.sizes.md,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginTop: SPACING.sm,
+  verifiedBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
