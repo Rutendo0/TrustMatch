@@ -1,11 +1,10 @@
 import { Router, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 router.post(
   '/swipe',
@@ -149,7 +148,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const responseMatches = matches.map(match => {
+    const responseMatches = matches.map((match: typeof matches[number]) => {
       const otherUser = match.user1Id === userId ? match.user2 : match.user1;
       const lastMessage = match.messages[0];
 

@@ -1,9 +1,9 @@
 import express from 'express';
-import { PrismaClient, EventCategory, EventType } from '@prisma/client';
+import { EventCategory, EventType } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Get all events with filtering and search
 router.get('/', async (req, res) => {

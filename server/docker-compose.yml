@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # TrustMatch API Server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trustmatch-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+      - SERVER_URL=${SERVER_URL}
+      - APP_URL=${APP_URL}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - VERIFICATION_API_KEY=${VERIFICATION_API_KEY}
+      - VERIFICATION_API_SECRET=${VERIFICATION_API_SECRET}
+      - VERIFICATION_API_URL=${VERIFICATION_API_URL}
+      - JUMIO_WEBHOOK_SECRET=${JUMIO_WEBHOOK_SECRET}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - FROM_EMAIL=${FROM_EMAIL}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_REGION=${AWS_REGION}
+    volumes:
+      - uploads:/app/uploads
+      - logs:/app/logs
+    networks:
+      - trustmatch-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Optional: Nginx reverse proxy (uncomment if needed)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: trustmatch-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ssl-certs:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - server
+  #   networks:
+  #     - trustmatch-network
+
+volumes:
+  uploads:
+  logs:
+
+networks:
+  trustmatch-network:
+    driver: bridge

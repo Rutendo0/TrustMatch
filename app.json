@@ -42,7 +42,8 @@
         {
           "cameraPermission": "TrustMatch needs camera access for identity verification."
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }

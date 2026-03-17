@@ -17,6 +17,8 @@ import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { Button, Card } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { AISecurityService, VerificationResult, LivenessResult } from '../../services/AISecurityService';
+import { api } from '../../services/api';
+import { diditService } from '../../services/DiditService';
 
 type SelfieVerificationScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -46,16 +48,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
   ];
 
   const handleStartCamera = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        Alert.alert(
-          'Camera Permission Required',
-          'Please allow camera access to take your verification selfie.'
-        );
-        return;
-      }
-    }
+    // Use on-device camera + local AI verification (Didit external API is optional)
     setStep('camera');
   };
 
@@ -225,13 +218,25 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
 
   const handleComplete = async () => {
     try {
-      // Navigate to profile setup with the verification data
-      navigation.navigate('ProfileSetup', { 
+      // Submit verification results to backend
+      if (verificationResult) {
+        await api.submitLocalVerification({
+          success: verificationResult.success,
+          trustScore: verificationResult.trustScore,
+          confidence: verificationResult.confidence,
+          ageEstimate: verificationResult.ageEstimate,
+          isLikelyBot: verificationResult.isLikelyBot,
+          isDeepfake: verificationResult.isDeepfake,
+        });
+      }
+      
+      // Navigate to email verification — email code will be sent on screen mount
+      navigation.navigate('EmailVerification', {
         formData: {
           ...formData,
           verificationCompleted: true,
           verificationResult: verificationResult,
-        }
+        },
       });
     } catch (error) {
       console.error('Registration error:', error);
@@ -283,10 +288,10 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
 
       <View style={styles.footer}>
         <Button
-          title="Open Camera"
+          title="Start Verification"
           onPress={handleStartCamera}
           size="large"
-          icon={<Ionicons name="camera" size={20} color={COLORS.white} />}
+          icon={<Ionicons name="shield-checkmark" size={20} color={COLORS.white} />}
           style={styles.cameraButton}
         />
       </View>

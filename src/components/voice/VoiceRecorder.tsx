@@ -30,7 +30,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [pulseAnimation] = useState(new Animated.Value(1));
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     
     if (isRecording) {
       interval = setInterval(() => {

@@ -38,7 +38,7 @@ export const VoiceVerification: React.FC<VoiceVerificationProps> = ({
   const [currentPrompt] = useState(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (isRecording) {

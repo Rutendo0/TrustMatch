@@ -91,7 +91,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
   const flatListRef = useRef<FlatList>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isSmall, isTablet, height } = useResponsive();
 
   const keyboardVerticalOffset = Platform.select({

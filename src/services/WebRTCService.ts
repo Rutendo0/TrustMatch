@@ -26,7 +26,7 @@ export class WebRTCService {
   private remoteUserId: string = '';
   private onStateChange?: (state: CallState) => void;
   private onRemoteStream?: (stream: MediaStream) => void;
-  private cameraRef: React.RefObject<CameraView> | null = null;
+  private cameraRef: React.RefObject<CameraView | null> | null = null;
 
   constructor(config: WebRTCConfig) {
     this.config = config;
@@ -353,7 +353,7 @@ export class WebRTCService {
   }
 
   // Set camera reference for recording
-  setCameraRef(ref: React.RefObject<CameraView>): void {
+  setCameraRef(ref: React.RefObject<CameraView | null>): void {
     this.cameraRef = ref;
   }
 

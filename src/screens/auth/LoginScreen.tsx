@@ -7,11 +7,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Input } from '../../components/common';
+import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING } from '../../constants/theme';
 
 type LoginScreenProps = {
@@ -48,14 +50,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     
     setIsLoading(true);
     try {
-      // TODO: Implement actual login API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Call the backend API to login (uses Clerk on backend)
+      await api.login(email, password);
+      
+      // Navigate to main app on success
       navigation.reset({
         index: 0,
         routes: [{ name: 'MainTabs' }],
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
+      Alert.alert('Login Failed', error.message || 'Invalid email or password. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -80,30 +85,26 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 
           <View style={styles.header}>
             <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>
-              Sign in to continue finding your perfect match
-            </Text>
+            <Text style={styles.subtitle}>Sign in to continue</Text>
           </View>
 
           <View style={styles.form}>
             <Input
               label="Email"
-              placeholder="Enter your email"
               value={email}
               onChangeText={setEmail}
+              placeholder="Enter your email"
               keyboardType="email-address"
               autoCapitalize="none"
-              icon="mail"
               error={errors.email}
             />
 
             <Input
               label="Password"
-              placeholder="Enter your password"
               value={password}
               onChangeText={setPassword}
+              placeholder="Enter your password"
               secureTextEntry
-              icon="lock-closed"
               error={errors.password}
             />
 
@@ -116,30 +117,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
               onPress={handleLogin}
               loading={isLoading}
               size="large"
-              style={styles.loginButton}
             />
           </View>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.socialButtons}>
-            <TouchableOpacity style={styles.socialButton}>
-              <Ionicons name="logo-google" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.socialButton}>
-              <Ionicons name="logo-apple" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-          </View>
-
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-              <Text style={styles.registerLink}>Sign Up</Text>
-            </TouchableOpacity>
+            <Text style={styles.footerText}>
+              Don't have an account?{' '}
+              <Text 
+                style={styles.link}
+                onPress={() => navigation.navigate('Register')}
+              >
+                Sign Up
+              </Text>
+            </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -157,20 +147,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.xl,
+    padding: SPACING.lg,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: SPACING.md,
+    marginBottom: SPACING.lg,
   },
   header: {
-    marginTop: SPACING.xl,
     marginBottom: SPACING.xl,
   },
   title: {
@@ -184,61 +166,26 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   form: {
-    gap: SPACING.sm,
+    flex: 1,
   },
   forgotPassword: {
     alignSelf: 'flex-end',
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.lg,
   },
   forgotPasswordText: {
-    fontSize: FONTS.sizes.sm,
     color: COLORS.primary,
+    fontSize: FONTS.sizes.sm,
     fontWeight: '600',
   },
-  loginButton: {
-    marginTop: SPACING.md,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: SPACING.xl,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  dividerText: {
-    marginHorizontal: SPACING.md,
-    color: COLORS.textSecondary,
-    fontSize: FONTS.sizes.sm,
-  },
-  socialButtons: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: SPACING.lg,
-  },
-  socialButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
   footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
     marginTop: SPACING.xl,
+    alignItems: 'center',
   },
   footerText: {
-    fontSize: FONTS.sizes.md,
     color: COLORS.textSecondary,
-  },
-  registerLink: {
     fontSize: FONTS.sizes.md,
+  },
+  link: {
     color: COLORS.primary,
     fontWeight: '600',
   },

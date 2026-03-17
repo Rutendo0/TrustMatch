@@ -1,7 +1,8 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const API_URL = 'http://localhost:3000/api';
+
+const API_URL = 'http://192.168.1.93:3000/api';
 
 class ApiService {
   private client: AxiosInstance;
@@ -18,6 +19,13 @@ class ApiService {
 
     this.client.interceptors.request.use(
       async (config) => {
+        // If token isn't in memory yet (e.g. app just started before init() finished),
+        // pull it directly from SecureStore so no request ever goes out without auth.
+        if (!this.token) {
+          try {
+            this.token = await SecureStore.getItemAsync('authToken');
+          } catch {}
+        }
         if (this.token) {
           config.headers.Authorization = `Bearer ${this.token}`;
         }
@@ -30,7 +38,12 @@ class ApiService {
       (response) => response,
       (error: AxiosError) => {
         if (error.response?.status === 401) {
-          this.logout();
+          // Only clear the in-memory token — do NOT delete from SecureStore.
+          // Deleting from SecureStore on every 401 causes a cascade: if one
+          // request fails (e.g. the best-effort image upload), the token is
+          // gone and every subsequent request in the same flow also gets 401.
+          // Individual screens handle navigation-to-login when needed.
+          this.token = null;
         }
         return Promise.reject(error);
       }
@@ -95,6 +108,20 @@ class ApiService {
     return response.data;
   }
 
+  async uploadProfilePhoto(imageUri: string) {
+    const formData = new FormData();
+    formData.append('photo', {
+      uri: imageUri,
+      type: 'image/jpeg',
+      name: 'photo.jpg',
+    } as any);
+
+    const response = await this.client.post('/users/photos', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
   async uploadSelfie(imageUri: string) {
     const formData = new FormData();
     formData.append('selfie', {
@@ -113,6 +140,66 @@ class ApiService {
 
   async getVerificationStatus() {
     const response = await this.client.get('/verification/status');
+    return response.data;
+  }
+
+  // Extract text from document image using server-side OCR.
+  // Short 20-second timeout: if OCR doesn't respond quickly we fail-fast and
+  // fall back to user-entered data, keeping the server healthy for the
+  // subsequent verifyLocalDocument call.
+  async extractDocumentText(imageUrl: string) {
+    const response = await this.client.post(
+      '/verification/extract-document-text',
+      { imageUrl },
+      { timeout: 20_000 }, // fail fast — OCR is best-effort, not required
+    );
+    return response.data;
+  }
+
+  async submitLocalVerification(data: {
+    success: boolean;
+    trustScore?: number;
+    confidence?: number;
+    ageEstimate?: number;
+    isLikelyBot?: boolean;
+    isDeepfake?: boolean;
+  }) {
+    const response = await this.client.post('/verification/submit-local', data);
+    return response.data;
+  }
+
+  // Document verification with on-device ML extracted data
+  async verifyLocalDocument(data: {
+    documentType: string;
+    documentNumber?: string;
+    firstName?: string;
+    lastName?: string;
+    fullName?: string;
+    dateOfBirth: string;
+    expiryDate?: string;
+    nationality?: string;
+    gender?: string;
+    address?: string;
+    confidence?: number;
+  }) {
+    const response = await this.client.post('/verification/document/verify-local', data);
+    return response.data;
+  }
+
+  // Store extracted document data
+  async storeDocumentData(data: any) {
+    const response = await this.client.post('/verification/document/store', data);
+    return response.data;
+  }
+
+  // Get document verification status
+  async getDocumentStatus() {
+    const response = await this.client.get('/verification/document/status');
+    return response.data;
+  }
+
+  async createDiditSession() {
+    const response = await this.client.post('/verification/start');
     return response.data;
   }
 
@@ -184,6 +271,27 @@ class ApiService {
 
   async markMessagesAsRead(matchId: string) {
     const response = await this.client.put(`/messages/${matchId}/read`);
+    return response.data;
+  }
+
+  // Email verification
+  async sendEmailVerification() {
+    const response = await this.client.post('/auth/send-email-verification');
+    return response.data;
+  }
+
+  async verifyEmailCode(code: string) {
+    const response = await this.client.post('/auth/verify-email', { code });
+    return response.data;
+  }
+
+  async resendEmailCode() {
+    const response = await this.client.post('/auth/resend-email-code');
+    return response.data;
+  }
+
+  async resendVerificationCode(email: string) {
+    const response = await this.client.post('/auth/resend-code', { email });
     return response.data;
   }
 }

@@ -24,6 +24,7 @@ import { FilterScreen } from '../screens/main/FilterScreen';
 import { PersonalityQuizScreen } from '../screens/profile/PersonalityQuizScreen';
 import { DealbreakersScreen } from '../screens/profile/DealbreakersScreen';
 import { ProfileSetupScreen } from '../screens/profile/ProfileSetupScreen';
+import { EmailVerificationScreen } from '../screens/auth/EmailVerificationScreen';
 import { COLORS, SHADOWS } from '../constants/theme';
 
 export type RootStackParamList = {
@@ -33,6 +34,7 @@ export type RootStackParamList = {
   IDVerification: { formData: any };
   PhotoUploadScreen: { formData: any };
   SelfieVerification: { formData: any };
+  EmailVerification: { formData: any };
   ProfileSetup: { formData: any };
   MainTabs: undefined;
   Chat: { matchId: string; name: string };
@@ -116,6 +118,7 @@ export const AppNavigator = () => {
         <Stack.Screen name="IDVerification" component={IDVerificationScreen} />
         <Stack.Screen name="PhotoUploadScreen" component={PhotoUploadScreen} />
         <Stack.Screen name="SelfieVerification" component={SelfieVerificationScreen} />
+        <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen

@@ -1,11 +1,10 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Configure multer for audio file uploads
 const storage = multer.diskStorage({

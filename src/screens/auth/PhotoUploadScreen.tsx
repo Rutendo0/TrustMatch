@@ -14,7 +14,9 @@ import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Button } from '../../components/common';
+import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { useDeviceFingerprint } from '../../hooks/useDeviceFingerprint';
 
 type PhotoUploadScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -33,6 +35,52 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
   const { formData } = route.params as { formData: any };
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const deviceFingerprint = useDeviceFingerprint();
+
+  const handleContinue = async () => {
+    if (photos.length === 0) {
+      Alert.alert('Photos Required', 'Please add at least one photo to continue.');
+      return;
+    }
+
+    try {
+      setIsRegistering(true);
+      
+      // Register the user in the backend after ID verification passed
+      await api.register({
+        email: formData.email,
+        phone: formData.phone,
+        password: formData.password,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        dateOfBirth: formData.dateOfBirth,
+        gender: formData.gender,
+        interestedIn: formData.gender === 'MALE' ? 'FEMALE' : 'MALE',
+        deviceFingerprint: deviceFingerprint.fingerprint || 'unknown',
+        platform: 'mobile',
+      });
+
+      // Upload profile photos to server (token is now set after register)
+      for (const photo of photos) {
+        try {
+          await api.uploadProfilePhoto(photo.uri);
+        } catch (uploadError) {
+          console.error('Photo upload error:', uploadError);
+          // Continue — don't block registration if one photo fails
+        }
+      }
+
+      navigation.navigate('SelfieVerification', {
+        formData: { ...formData, photos: photos.map(p => p.uri) }
+      });
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      Alert.alert('Registration Error', error.message || 'Failed to create account. Please try again.');
+    } finally {
+      setIsRegistering(false);
+    }
+  };
 
   const selectImage = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -85,31 +133,33 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
   };
 
   const renderPhotoSlot = () => {
-    const remainingSlots = 6 - photos.length;
-    const slots = [];
+    const slots: React.ReactNode[] = [];
 
     // Render existing photos
-    photos.forEach((photo, index) => (
-      <View key={photo.id} style={styles.photoContainer}>
-        <Image source={{ uri: photo.uri }} style={styles.photo} />
-        <TouchableOpacity 
-          style={styles.removeButton}
-          onPress={() => removePhoto(photo.id)}
-        >
-          <Ionicons name="close" size={16} color={COLORS.white} />
-        </TouchableOpacity>
-        {index === 0 && (
-          <View style={styles.primaryBadge}>
-            <Text style={styles.primaryText}>Main</Text>
-          </View>
-        )}
-      </View>
-    ));
+    photos.forEach((photo, index) => {
+      slots.push(
+        <View key={photo.id} style={styles.photoContainer}>
+          <Image source={{ uri: photo.uri }} style={styles.photo} />
+          <TouchableOpacity
+            style={styles.removeButton}
+            onPress={() => removePhoto(photo.id)}
+          >
+            <Ionicons name="close" size={16} color={COLORS.white} />
+          </TouchableOpacity>
+          {index === 0 && (
+            <View style={styles.primaryBadge}>
+              <Text style={styles.primaryText}>Main</Text>
+            </View>
+          )}
+        </View>
+      );
+    });
 
-    // Render empty slots
+    // Render empty slots to fill up to 6
+    const remainingSlots = 6 - photos.length;
     for (let i = 0; i < remainingSlots; i++) {
       slots.push(
-        <TouchableOpacity 
+        <TouchableOpacity
           key={`empty-${i}`}
           style={styles.emptySlot}
           onPress={selectImage}
@@ -184,11 +234,11 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
         </View>
         
         <Button
-          title={isUploading ? "Processing..." : "Continue"}
-          onPress={handleNext}
+          title={isUploading || isRegistering ? "Processing..." : "Continue"}
+          onPress={handleContinue}
           size="large"
-          disabled={photos.length < 3 || isUploading}
-          loading={isUploading}
+          disabled={photos.length < 3 || isUploading || isRegistering}
+          loading={isUploading || isRegistering}
         />
       </View>
     </SafeAreaView>

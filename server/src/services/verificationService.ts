@@ -1,180 +1,150 @@
-import { PrismaClient, IDDocumentType } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
+// ─────────────────────────────────────────────────────────────────────────────
+// Didit Verification Service
+//
+// Docs: https://docs.didit.me
+// Authentication: API Key (x-api-key header)
+// ─────────────────────────────────────────────────────────────────────────────
 
-export interface VerificationResult {
-  success: boolean;
-  faceMatchScore?: number;
-  livenessScore?: number;
-  documentValid?: boolean;
-  extractedData?: {
-    fullName: string;
-    dateOfBirth: string;
-    documentNumber: string;
-    expiryDate?: string;
-  };
-  errors?: string[];
+interface DiditSessionResponse {
+  id: string;
+  url: string;
+  status: string;
 }
 
-export class VerificationService {
-  async verifyDocument(
-    userId: string,
-    documentType: IDDocumentType,
-    documentBuffer: Buffer
-  ): Promise<VerificationResult> {
-    try {
-      await this.simulateApiDelay();
+interface DiditSessionResult {
+  sessionId: string;
+  sessionUrl: string;
+}
 
-      const isValid = Math.random() > 0.1;
-      
-      if (!isValid) {
-        return {
-          success: false,
-          documentValid: false,
-          errors: ['Document appears to be invalid or unreadable'],
-        };
-      }
+export class DiditVerificationService {
+  private readonly apiKey: string;
+  private readonly apiSecret: string;
+  private readonly baseUrl: string;
 
-      const extractedData = {
-        fullName: 'Extracted Name',
-        dateOfBirth: '1990-01-01',
-        documentNumber: 'ABC123456',
-        expiryDate: '2030-01-01',
-      };
-
-      await prisma.verification.update({
-        where: { userId },
-        data: {
-          idDocumentType: documentType,
-          idVerified: true,
-        },
-      });
-
-      return {
-        success: true,
-        documentValid: true,
-        extractedData,
-      };
-    } catch (error) {
-      console.error('Document verification error:', error);
-      return {
-        success: false,
-        errors: ['Verification service unavailable'],
-      };
-    }
+  constructor() {
+    this.apiKey = process.env.VERIFICATION_API_KEY || '';
+    this.apiSecret = process.env.VERIFICATION_API_SECRET || '';
+    this.baseUrl = (process.env.VERIFICATION_API_URL || 'https://gateway.didit.me/v1').replace(/\/$/, '');
   }
 
-  async verifySelfie(
-    userId: string,
-    selfieBuffer: Buffer
-  ): Promise<VerificationResult> {
-    try {
-      await this.simulateApiDelay();
-
-      const verification = await prisma.verification.findUnique({
-        where: { userId },
-      });
-
-      if (!verification?.idDocumentUrl) {
-        return {
-          success: false,
-          errors: ['Please upload ID document first'],
-        };
-      }
-
-      const faceMatchScore = 0.8 + Math.random() * 0.15;
-      const livenessScore = 0.85 + Math.random() * 0.12;
-
-      const isVerified = faceMatchScore >= 0.75 && livenessScore >= 0.8;
-
-      await prisma.verification.update({
-        where: { userId },
-        data: {
-          selfieVerified: isVerified,
-          faceMatchScore,
-          livenessScore,
-          isVerified: isVerified && verification.idVerified,
-          verifiedAt: isVerified && verification.idVerified ? new Date() : null,
-        },
-      });
-
-      return {
-        success: isVerified,
-        faceMatchScore,
-        livenessScore,
-        errors: isVerified ? undefined : ['Face verification failed. Please try again with better lighting.'],
-      };
-    } catch (error) {
-      console.error('Selfie verification error:', error);
-      return {
-        success: false,
-        errors: ['Verification service unavailable'],
-      };
-    }
+  private isConfigured(): boolean {
+    return !!(this.apiKey && this.apiSecret);
   }
 
-  async checkForDuplicateAccounts(
-    email: string,
-    phone: string,
-    deviceId: string
-  ): Promise<{ isDuplicate: boolean; reason?: string }> {
-    const blockedAccount = await prisma.blockedAccount.findFirst({
-      where: {
-        OR: [
-          { email },
-          { phone },
-          { deviceId },
-        ],
+  // ── Create a verification session ────────────────────────────────────────
+  async createVerificationSession(userId: string, email: string): Promise<DiditSessionResult> {
+    if (!this.isConfigured()) {
+      throw new Error('Didit verification is not configured');
+    }
+
+    const response = await fetch(`${this.baseUrl}/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.VERIFICATION_APP_ID || this.apiKey,
       },
+      body: JSON.stringify({
+        workflow: 'standard', // or custom workflow ID
+        user: {
+          id: userId,
+          email: email,
+        },
+        // Redirect URLs after completion
+        redirect_urls: {
+          success: `${process.env.APP_URL || 'trustmatch://'}verification/success`,
+          error: `${process.env.APP_URL || 'trustmatch://'}verification/error`,
+        },
+      }),
     });
 
-    if (blockedAccount) {
-      return {
-        isDuplicate: true,
-        reason: 'Account associated with blocked user',
-      };
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Didit session creation failed (${response.status}): ${error}`);
     }
 
-    const existingDevice = await prisma.deviceFingerprint.findFirst({
-      where: { deviceId },
-    });
-
-    if (existingDevice) {
-      return {
-        isDuplicate: true,
-        reason: 'Device already registered with another account',
-      };
-    }
-
-    return { isDuplicate: false };
-  }
-
-  async blockAccount(
-    email?: string,
-    phone?: string,
-    deviceId?: string,
-    reason: string = 'Violation of terms'
-  ): Promise<void> {
-    await prisma.blockedAccount.create({
+    const data = (await response.json()) as DiditSessionResponse;
+    
+    // Store workflow/session ID in database
+    await prisma.verification.update({
+      where: { userId },
       data: {
-        email,
-        phone,
-        deviceId,
-        reason,
+        jumioWorkflowId: data.id, // Using this field to store Didit session ID
       },
     });
 
-    if (deviceId) {
-      await prisma.deviceFingerprint.updateMany({
-        where: { deviceId },
-        data: { isBlocked: true },
-      });
-    }
+    return {
+      sessionId: data.id,
+      sessionUrl: data.url,
+    };
   }
 
-  private async simulateApiDelay(): Promise<void> {
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+  // ── Retrieve session result ───────────────────────────────────────────────
+  async getSessionResult(sessionId: string): Promise<any> {
+    if (!this.isConfigured()) {
+      throw new Error('Didit verification is not configured');
+    }
+
+    const response = await fetch(`${this.baseUrl}/sessions/${sessionId}`, {
+      method: 'GET',
+      headers: {
+        'x-api-key': this.apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Didit session retrieval failed (${response.status}): ${error}`);
+    }
+
+    return response.json();
+  }
+
+  // ── Process webhook payload ───────────────────────────────────────────────
+  async processWebhook(payload: any): Promise<void> {
+    const sessionId = payload.session_id || payload.id;
+    const status = payload.status;
+    
+    if (!sessionId) {
+      console.error('Didit webhook: no session_id found');
+      return;
+    }
+
+    // Find user by Didit session ID
+    const verification = await prisma.verification.findFirst({
+      where: { jumioWorkflowId: sessionId },
+      include: { user: true },
+    });
+
+    if (!verification) {
+      console.error(`Didit webhook: no verification found for session ${sessionId}`);
+      return;
+    }
+
+    const userId = verification.userId;
+
+    // Map Didit status to our verification fields
+    const isSuccess = status === 'completed' || status === 'approved' || status === 'success';
+    
+    await prisma.verification.update({
+      where: { userId },
+      data: {
+        isVerified: isSuccess,
+        idVerified: isSuccess,
+        selfieVerified: isSuccess,
+        jumioDecision: status?.toUpperCase(),
+        faceMatchScore: payload.face_match_score ? payload.face_match_score * 100 : null,
+        livenessScore: payload.liveness_score ? payload.liveness_score * 100 : null,
+        verifiedAt: isSuccess ? new Date() : null,
+      },
+    });
+
+    console.log(`✅ Didit webhook processed for user ${userId}: ${status}`);
   }
 }
 
-export const verificationService = new VerificationService();
+// Export singleton instance
+export const verificationService = new DiditVerificationService();
+
+export default verificationService;

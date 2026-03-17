@@ -39,7 +39,7 @@ export const LocationShare: React.FC<LocationShareProps> = ({
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (activeShare) {
       interval = setInterval(() => {
         const remaining = Math.max(

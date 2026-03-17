@@ -1,12 +1,12 @@
 import { Router, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 
 const router = Router();
-const prisma = new PrismaClient();
 
+// ── GET /api/users/me ─────────────────────────────────────────────────────────
 router.get('/me', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
@@ -15,17 +15,13 @@ router.get('/me', async (req: AuthRequest, res: Response) => {
       where: { id: userId },
       include: {
         verification: true,
-        photos: {
-          orderBy: { order: 'asc' },
-        },
+        photos: { orderBy: { order: 'asc' } },
       },
     });
 
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
+    if (!user) throw new AppError('User not found', 404);
 
-    res.json({
+    return res.json({
       id: user.id,
       email: user.email,
       phone: user.phone,
@@ -37,6 +33,7 @@ router.get('/me', async (req: AuthRequest, res: Response) => {
       bio: user.bio,
       city: user.city,
       country: user.country,
+      role: user.role,
       photos: user.photos,
       verification: user.verification,
       preferences: {
@@ -50,10 +47,11 @@ router.get('/me', async (req: AuthRequest, res: Response) => {
       return res.status(error.statusCode).json({ error: error.message });
     }
     console.error('Get user error:', error);
-    res.status(500).json({ error: 'Failed to get user profile' });
+    return res.status(500).json({ error: 'Failed to get user profile' });
   }
 });
 
+// ── PUT /api/users/me ─────────────────────────────────────────────────────────
 router.put(
   '/me',
   [
@@ -75,21 +73,10 @@ router.put(
 
       const user = await prisma.user.update({
         where: { id: userId },
-        data: {
-          firstName,
-          lastName,
-          bio,
-          city,
-          country,
-          updatedAt: new Date(),
-        },
-        include: {
-          verification: true,
-          photos: true,
-        },
+        data: { firstName, lastName, bio, city, country, updatedAt: new Date() },
       });
 
-      res.json({
+      return res.json({
         id: user.id,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -99,11 +86,33 @@ router.put(
       });
     } catch (error) {
       console.error('Update user error:', error);
-      res.status(500).json({ error: 'Failed to update profile' });
+      return res.status(500).json({ error: 'Failed to update profile' });
     }
   }
 );
 
+// ── DELETE /api/users/me ──────────────────────────────────────────────────────
+router.delete('/me', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    // Invalidate all sessions
+    await prisma.refreshToken.deleteMany({ where: { userId } });
+
+    // Soft-delete: deactivate account
+    await prisma.user.update({
+      where: { id: userId },
+      data: { isActive: false, email: `deleted_${userId}@deleted`, phone: `deleted_${userId}`, updatedAt: new Date() },
+    });
+
+    return res.json({ success: true, message: 'Account deleted' });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    return res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
+// ── PUT /api/users/preferences ────────────────────────────────────────────────
 router.put(
   '/preferences',
   [
@@ -124,15 +133,10 @@ router.put(
 
       const user = await prisma.user.update({
         where: { id: userId },
-        data: {
-          ageRangeMin,
-          ageRangeMax,
-          maxDistance,
-          interestedIn,
-        },
+        data: { ageRangeMin, ageRangeMax, maxDistance, interestedIn },
       });
 
-      res.json({
+      return res.json({
         ageRangeMin: user.ageRangeMin,
         ageRangeMax: user.ageRangeMax,
         maxDistance: user.maxDistance,
@@ -140,70 +144,170 @@ router.put(
       });
     } catch (error) {
       console.error('Update preferences error:', error);
-      res.status(500).json({ error: 'Failed to update preferences' });
+      return res.status(500).json({ error: 'Failed to update preferences' });
     }
   }
 );
 
+// ── PUT /api/users/location ───────────────────────────────────────────────────
+router.put(
+  '/location',
+  [
+    body('latitude').isFloat({ min: -90, max: 90 }),
+    body('longitude').isFloat({ min: -180, max: 180 }),
+    body('city').optional().trim(),
+    body('country').optional().trim(),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const userId = req.userId!;
+      const { latitude, longitude, city, country } = req.body;
+
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: { latitude, longitude, city, country },
+        select: { id: true, latitude: true, longitude: true, city: true, country: true },
+      });
+
+      return res.json(user);
+    } catch (error) {
+      console.error('Update location error:', error);
+      return res.status(500).json({ error: 'Failed to update location' });
+    }
+  }
+);
+
+// ── GET /api/users/discover ───────────────────────────────────────────────────
 router.get('/discover', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const { limit = 10 } = req.query;
 
-    const currentUser = await prisma.user.findUnique({
-      where: { id: userId },
-    });
+    const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!currentUser) throw new AppError('User not found', 404);
 
-    if (!currentUser) {
-      throw new AppError('User not found', 404);
-    }
+    const [swipedUsers, myBlocks, blockedByOthers] = await Promise.all([
+      prisma.swipe.findMany({
+        where: { swiperId: userId },
+        select: { swipedId: true },
+      }),
+      prisma.userBlock.findMany({
+        where: { blockerId: userId },
+        select: { blockedId: true },
+      }),
+      prisma.userBlock.findMany({
+        where: { blockedId: userId },
+        select: { blockerId: true },
+      }),
+    ]);
 
-    const swipedUserIds = await prisma.swipe.findMany({
-      where: { swiperId: userId },
-      select: { swipedId: true },
-    });
+    const excludeIds = [
+      userId,
+      ...swipedUsers.map((s) => s.swipedId),
+      ...myBlocks.map((b) => b.blockedId),
+      ...blockedByOthers.map((b) => b.blockerId),
+    ];
 
-    const excludeIds = [userId, ...swipedUserIds.map(s => s.swipedId)];
+    const genderFilter =
+      currentUser.interestedIn === 'MALE' ? 'MALE' : 'FEMALE';
 
     const profiles = await prisma.user.findMany({
       where: {
         id: { notIn: excludeIds },
         isActive: true,
-        verification: {
-          isVerified: true,
-        },
-        gender: currentUser.interestedIn === 'BOTH' 
-          ? undefined 
-          : currentUser.interestedIn === 'MALE' ? 'MALE' : 'FEMALE',
+        verification: { isVerified: true },
+        ...(genderFilter ? { gender: genderFilter } : {}),
       },
       include: {
-        photos: {
-          orderBy: { order: 'asc' },
-        },
-        verification: {
-          select: { isVerified: true },
+        photos: { orderBy: { order: 'asc' } },
+        verification: { select: { isVerified: true } },
+        voiceNotes: {
+          where: { isActive: true },
+          take: 3,
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, audioUrl: true, duration: true, prompt: true },
         },
       },
       take: Number(limit),
     });
 
-    const responseProfiles = profiles.map(profile => ({
-      id: profile.id,
-      firstName: profile.firstName,
-      age: calculateAge(profile.dateOfBirth),
-      bio: profile.bio,
-      city: profile.city,
-      photos: profile.photos.map(p => p.url),
-      isVerified: profile.verification?.isVerified || false,
+    const response = profiles.map((p) => ({
+      id: p.id,
+      firstName: p.firstName,
+      age: calculateAge(p.dateOfBirth),
+      bio: p.bio,
+      city: p.city,
+      photos: p.photos.map((ph) => ph.url),
+      isVerified: p.verification?.isVerified || false,
+      voiceNotes: p.voiceNotes,
+      lastActive: p.lastActive,
     }));
 
-    res.json(responseProfiles);
+    return res.json(response);
   } catch (error) {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ error: error.message });
     }
     console.error('Discover error:', error);
-    res.status(500).json({ error: 'Failed to get profiles' });
+    return res.status(500).json({ error: 'Failed to get profiles' });
+  }
+});
+
+// ── GET /api/users/:userId — public profile ───────────────────────────────────
+router.get('/:userId', async (req: AuthRequest, res: Response) => {
+  try {
+    const requesterId = req.userId!;
+    const { userId } = req.params;
+
+    // Hide profile if any block exists in either direction
+    const block = await prisma.userBlock.findFirst({
+      where: {
+        OR: [
+          { blockerId: requesterId, blockedId: userId },
+          { blockerId: userId, blockedId: requesterId },
+        ],
+      },
+    });
+    if (block) throw new AppError('User not found', 404);
+
+    const user = await prisma.user.findFirst({
+      where: { id: userId, isActive: true },
+      include: {
+        photos: { orderBy: { order: 'asc' } },
+        verification: { select: { isVerified: true } },
+        voiceNotes: {
+          where: { isActive: true },
+          take: 3,
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, audioUrl: true, duration: true, prompt: true },
+        },
+      },
+    });
+
+    if (!user) throw new AppError('User not found', 404);
+
+    return res.json({
+      id: user.id,
+      firstName: user.firstName,
+      age: calculateAge(user.dateOfBirth),
+      bio: user.bio,
+      city: user.city,
+      photos: user.photos.map((p) => p.url),
+      isVerified: user.verification?.isVerified || false,
+      voiceNotes: user.voiceNotes,
+      lastActive: user.lastActive,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Get profile error:', error);
+    return res.status(500).json({ error: 'Failed to get user profile' });
   }
 });
 
