@@ -30,7 +30,8 @@
       "package": "com.trustmatch.app",
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE"
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -44,6 +45,12 @@
         }
       ],
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "77da5cad-2126-41ce-8d2b-834f10f2bc16"
+      }
+    },
+    "owner": "rutend"
   }
 }
