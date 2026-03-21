@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { VerifiedBadge } from '../../components/common';
+import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 
@@ -109,11 +110,73 @@ const NEW_MATCHES: Match[] = [
 
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [newMatches, setNewMatches] = useState<Match[]>([]);
+  const [loading, setLoading] = useState(true);
   const searchInputRef = useRef<TextInput>(null);
   const { normalize: rNormalize } = useResponsive();
 
-  const filteredMatches = MOCK_MATCHES.filter(match =>
-    match.name.toLowerCase().includes(searchQuery.toLowerCase())
+  useEffect(() => {
+    fetchMatches();
+  }, []);
+
+  const fetchMatches = async () => {
+    try {
+      const data = await api.getMatches();
+      // Map API response to Match interface
+      // Separate matches into new matches (no messages yet) and conversations
+      const newMatchesList: Match[] = [];
+      const conversationsList: Match[] = [];
+      
+      data.forEach((m: any) => {
+        const match: Match = {
+          id: m.id,
+          name: m.user?.firstName || 'User',
+          photo: m.user?.photo || 'https://via.placeholder.com/100',
+          isVerified: m.user?.isVerified || false,
+          trustScore: 85,
+          aiModerationEnabled: true,
+          safetyLevel: 'high' as const,
+          lastMessage: m.lastMessage?.content || 'Start a conversation!',
+          lastMessageTime: m.lastMessage?.sentAt ? formatTime(m.lastMessage.sentAt) : '',
+          unreadCount: m.lastMessage && !m.lastMessage.isRead ? 1 : 0,
+          isOnline: m.user?.isOnline || false,
+        };
+        
+        // If there's no message, it's a new match
+        if (!m.lastMessage) {
+          newMatchesList.push({ ...match, isNew: true });
+        } else {
+          conversationsList.push(match);
+        }
+      });
+      
+      setNewMatches(newMatchesList);
+      setMatches(conversationsList);
+    } catch (error) {
+      console.error('Failed to fetch matches:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return 'Now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  const filteredMatches = (matches || []).filter(match =>
+    match?.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleSearchSubmit = () => {
@@ -288,10 +351,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
         )}
       </View>
 
+      {newMatches.length > 0 && (
       <View style={styles.newMatchesSection}>
         <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>New Matches</Text>
         <FlatList
-          data={NEW_MATCHES}
+          data={newMatches}
           renderItem={renderNewMatch}
           keyExtractor={(item) => item.id}
           horizontal
@@ -300,6 +364,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
           keyboardShouldPersistTaps="handled"
         />
       </View>
+      )}
 
       <View style={styles.conversationsSection}>
         <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>Conversations</Text>

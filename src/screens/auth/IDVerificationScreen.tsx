@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Button, Input, DatePicker } from '../../components/common';
 import { api } from '../../services/api';
 import { ExtractedDocumentData } from '../../services/DocumentVerificationService';
+import { registrationProgress, RegistrationStep } from '../../services/RegistrationProgressService';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 
 type IDVerificationScreenProps = {
@@ -24,15 +25,15 @@ type IDVerificationScreenProps = {
   route: RouteProp<any>;
 };
 
-type Step = 'details' | 'id_upload' | 'id_back' | 'verifying' | 'success';
+type Step = 'id_upload' | 'id_back' | 'verifying' | 'success';
 type IDType = 'passport' | 'drivers_license' | 'national_id';
 
 export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
   navigation,
   route,
 }) => {
-  const { formData } = route.params as { formData: any };
-  const [step, setStep] = useState<Step>('details');
+  const { formData } = route.params as { formData?: any };
+  const [step, setStep] = useState<Step>('id_upload');
   const [isLoading, setIsLoading] = useState(false);
   const [processingStep, setProcessingStep] = useState<string>('');
   
@@ -51,6 +52,36 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const MAX_OCR_ATTEMPTS = 3;
+
+  // Load saved progress on mount
+  useEffect(() => {
+    const loadProgress = async () => {
+      const progress = await registrationProgress.getProgress();
+      if (progress && progress.formData) {
+        // Restore saved form data
+        if (progress.formData.firstName) setFirstName(progress.formData.firstName);
+        if (progress.formData.lastName) setLastName(progress.formData.lastName);
+        if (progress.formData.dateOfBirth) setDateOfBirth(progress.formData.dateOfBirth);
+        if (progress.formData.gender) setGender(progress.formData.gender as 'MALE' | 'FEMALE' | '');
+        if (progress.formData.idType) setIdType(progress.formData.idType as IDType);
+        if (progress.formData.idFrontImage) setIdFrontImage(progress.formData.idFrontImage);
+        if (progress.formData.idBackImage) setIdBackImage(progress.formData.idBackImage);
+        if (progress.formData.extractedData) setExtractedData(progress.formData.extractedData);
+        
+        // Restore the step
+        const stepMap: Record<string, Step> = {
+          'id_upload': 'id_upload',
+          'id_back': 'id_back',
+          'verifying': 'verifying',
+          'success': 'success',
+        };
+        if (stepMap[progress.step]) {
+          setStep(stepMap[progress.step]);
+        }
+      }
+    };
+    loadProgress();
+  }, []);
 
   const validateDetails = () => {
     const newErrors: Record<string, string> = {};
@@ -95,6 +126,14 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
   const handleContinue = async () => {
     if (!validateDetails()) return;
+    // Save progress before moving to next step
+    await registrationProgress.saveProgress('id_upload', {
+      ...formData,
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+    });
     setStep('id_upload');
   };
 
@@ -161,6 +200,17 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
     // Reset OCR attempt count for new upload
     setOcrAttemptCount(0);
 
+    // Save progress
+    await registrationProgress.saveProgress('id_upload', {
+      ...formData,
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+      idType,
+      idFrontImage,
+    });
+
     // If not driver's license, process directly
     if (idType !== 'drivers_license') {
       await processFrontImage();
@@ -173,6 +223,19 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
     if (!validateBackImage()) return;
     // Reset OCR attempt count for new upload
     setOcrAttemptCount(0);
+    
+    // Save progress
+    await registrationProgress.saveProgress('id_back', {
+      ...formData,
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+      idType,
+      idFrontImage,
+      idBackImage,
+    });
+    
     await processFrontImage();
   };
 
@@ -213,13 +276,13 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
     setProcessingStep('Uploading document...');
 
     // Upload the ID image to the server so it's stored for audit/review.
-    // This is best-effort — a failed upload does not block the verification step.
     try {
       if (idFrontImage) {
-        await api.uploadIdDocument(idType!.toUpperCase(), idFrontImage);
+        await api.uploadIdDocument(idType!.toUpperCase(), idFrontImage, formData?.email);
       }
-    } catch (uploadErr) {
-      console.log('ID image upload failed, continuing with data verification:', uploadErr);
+    } catch (uploadErr: any) {
+      // Log error but continue - don't block verification on upload failure
+      console.log('ID image upload failed:', uploadErr?.message || uploadErr);
     }
 
     setProcessingStep('Verifying document details...');
@@ -261,9 +324,13 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       }
 
       // Send to backend — use user-entered data as fallback for any OCR fields
+      // Pass email/password for pre-registration verification
       setProcessingStep('Finalizing verification...');
 
       const backendResult = await api.verifyLocalDocument({
+        email: formData?.email,
+        password: formData?.password,
+
         documentType: idType!.toUpperCase(),
         documentNumber: docData?.documentNumber,
         firstName: docData?.firstName || firstName,
@@ -279,20 +346,35 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
       if (backendResult.success) {
         setStep('success');
+        
+        // Update user profile with real details from verification
+        try {
+          await api.updateProfile({
+            firstName,
+            lastName,
+          });
+        } catch (profileError) {
+          console.log('Could not update profile, continuing:', profileError);
+        }
+        
+        // Save progress - ID verification completed
+        const photoUploadData = {
+          ...formData,
+          firstName,
+          lastName,
+          dateOfBirth,
+          gender,
+          idType,
+          idFrontImage,
+          idBackImage,
+          extractedData: docData,
+          documentVerified: true,
+        };
+        await registrationProgress.saveProgress('photos', photoUploadData);
+        
         setTimeout(() => {
           navigation.navigate('PhotoUploadScreen', {
-            formData: {
-              ...formData,
-              firstName,
-              lastName,
-              dateOfBirth,
-              gender,
-              idType,
-              idFrontImage,
-              idBackImage,
-              extractedData: docData,
-              documentVerified: true,
-            }
+            formData: photoUploadData,
           });
         }, 1500);
       } else {
@@ -305,9 +387,37 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       }
     } catch (error: any) {
       console.error('Verification error:', error);
+      
+      // Extract more meaningful error message
+      let errorMessage = 'An error occurred during verification. Please try again.';
+      
+      // Check for rate limiting (429)
+      if (error.response?.status === 429) {
+        errorMessage = error.response?.data?.error || 'Too many verification attempts. Please wait a moment and try again.';
+      }
+      // Check for timeout
+      else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMessage = 'Verification request timed out. Please check your connection and try again.';
+      }
+      // Check for network errors
+      else if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
+        errorMessage = 'Cannot connect to server. Please verify the server is running and try again.';
+      }
+      else if (error.response?.data?.error) {
+        // Server returned a specific error message
+        errorMessage = error.response.data.error;
+        
+        // Add details if available in development mode
+        if (error.response.data.details) {
+          console.log('Verification error details:', error.response.data.details);
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       Alert.alert(
         'Verification Error',
-        error.message || 'An error occurred during verification. Please try again.',
+        errorMessage,
         [{ text: 'OK', onPress: handleRetryOCR }]
       );
     }
@@ -322,8 +432,6 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
   // Rendering helper for steps
   const renderStep = () => {
     switch (step) {
-      case 'details':
-        return renderDetailsStep();
       case 'id_upload':
         return renderIdUploadStep();
       case 'id_back':
@@ -333,7 +441,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       case 'success':
         return renderSuccessStep();
       default:
-        return null;
+        return renderIdUploadStep();
     }
   };
 
@@ -523,14 +631,12 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
         <View style={styles.header}>
           <Text style={styles.title}>
-            {step === 'details' ? 'About You' : 
-             step === 'id_upload' ? 'Upload Your ID' :
+            {step === 'id_upload' ? 'Upload Your ID' :
              step === 'id_back' ? 'Upload ID Back' :
              step === 'success' ? 'Verified!' : 'Verifying'}
           </Text>
           <Text style={styles.subtitle}>
-            {step === 'details' ? 'Tell us about yourself' : 
-             step === 'id_upload' ? 'Upload a clear photo of your ID document' :
+            {step === 'id_upload' ? 'Upload a clear photo of your ID document' :
              step === 'id_back' ? 'Upload the back of your ID' :
              step === 'success' ? 'Your identity has been verified' : 
              'Analyzing your document'}
@@ -538,7 +644,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
         </View>
 
         {/* Progress indicator */}
-        {step !== 'verifying' && step !== 'success' && step !== 'details' && (
+        {step !== 'verifying' && step !== 'success' && (
           <View style={styles.progressContainer}>
             <View style={[styles.progressStep, styles.progressStepCompleted]}>
               <Ionicons name="checkmark" size={16} color={COLORS.white} />

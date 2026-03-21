@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Input } from '../../components/common';
 import { api } from '../../services/api';
+import { registrationProgress } from '../../services/RegistrationProgressService';
 import { COLORS, FONTS, SPACING } from '../../constants/theme';
 
 type LoginScreenProps = {
@@ -21,6 +22,20 @@ type LoginScreenProps = {
 };
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
+  // Check for saved registration progress and redirect
+  useEffect(() => {
+    const checkProgress = async () => {
+      const resumeStep = await registrationProgress.getResumeStep();
+      if (resumeStep) {
+        // User has incomplete registration - redirect to where they left off
+        // But first check if this is an old saved state - clear it to let user login
+        await registrationProgress.clearProgress();
+        // Don't redirect - let user login if they're already verified
+      }
+    };
+    checkProgress();
+  }, [navigation]);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -50,8 +65,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     
     setIsLoading(true);
     try {
-      // Call the backend API to login (uses Clerk on backend)
+      // Call the backend API to login
       await api.login(email, password);
+      
+      // Clear any saved registration progress since user is now logged in
+      await registrationProgress.clearProgress();
       
       // Navigate to main app on success
       navigation.reset({
@@ -60,7 +78,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       });
     } catch (error: any) {
       console.error('Login error:', error);
-      Alert.alert('Login Failed', error.message || 'Invalid email or password. Please try again.');
+      const errorMessage = error.message || 'Invalid email or password. Please try again.';
+      
+      // Check if this is a verification-related error
+      if (errorMessage.toLowerCase().includes('verification') || 
+          errorMessage.toLowerCase().includes('verified')) {
+        // Clear any stale registration progress
+        await registrationProgress.clearProgress();
+        
+        // Show professional verification required message
+        Alert.alert(
+          'Verification Required',
+          'You need to complete the verification process before logging in. This helps keep our community safe.',
+          [
+            {
+              text: 'Complete Verification',
+              onPress: () => {
+                // Navigate to email verification with the user's email
+                navigation.navigate('EmailVerification', { formData: { email } });
+              },
+            },
+            {
+              text: 'Go Back',
+              style: 'cancel',
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Login Failed', errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }

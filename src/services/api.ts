@@ -1,8 +1,11 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { registrationProgress } from './RegistrationProgressService';
 
 
-const API_URL = 'http://192.168.1.93:3000/api';
+// Use environment variable or default to localhost for development
+// For production, set EXPO_PUBLIC_API_URL in your environment
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.93:3000/api';
 
 class ApiService {
   private client: AxiosInstance;
@@ -37,14 +40,8 @@ class ApiService {
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
-        if (error.response?.status === 401) {
-          // Only clear the in-memory token — do NOT delete from SecureStore.
-          // Deleting from SecureStore on every 401 causes a cascade: if one
-          // request fails (e.g. the best-effort image upload), the token is
-          // gone and every subsequent request in the same flow also gets 401.
-          // Individual screens handle navigation-to-login when needed.
-          this.token = null;
-        }
+        // Don't retry on 401 - just reject the error
+        // Let each request handle its own auth errors
         return Promise.reject(error);
       }
     );
@@ -66,12 +63,14 @@ class ApiService {
   async logout() {
     this.token = null;
     await SecureStore.deleteItemAsync('authToken');
+    // Clear registration progress on logout
+    await registrationProgress.clearProgress();
   }
 
   async register(data: {
-    email: string;
-    phone: string;
-    password: string;
+    email?: string;
+    phone?: string;
+    password?: string;
     firstName: string;
     lastName: string;
     dateOfBirth: string;
@@ -91,7 +90,7 @@ class ApiService {
     return response.data;
   }
 
-  async uploadIdDocument(documentType: string, imageUri: string) {
+  async uploadIdDocument(documentType: string, imageUri: string, email?: string) {
     const formData = new FormData();
     formData.append('documentType', documentType);
     formData.append('document', {
@@ -99,11 +98,16 @@ class ApiService {
       type: 'image/jpeg',
       name: 'document.jpg',
     } as any);
+    if (email) {
+      formData.append('email', email);
+    }
 
+    // Add timeout to prevent hanging
     const response = await this.client.post('/verification/id-document', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 30000, // 30 second timeout for upload
     });
     return response.data;
   }
@@ -169,7 +173,10 @@ class ApiService {
   }
 
   // Document verification with on-device ML extracted data
+  // Can accept email/password for pre-registration verification
   async verifyLocalDocument(data: {
+    email?: string;
+    password?: string;
     documentType: string;
     documentNumber?: string;
     firstName?: string;
@@ -182,7 +189,10 @@ class ApiService {
     address?: string;
     confidence?: number;
   }) {
-    const response = await this.client.post('/verification/document/verify-local', data);
+    // Use shorter timeout for verification - 15 seconds should be enough
+    const response = await this.client.post('/verification/document/verify-local', data, {
+      timeout: 15000,
+    });
     return response.data;
   }
 
@@ -198,11 +208,6 @@ class ApiService {
     return response.data;
   }
 
-  async createDiditSession() {
-    const response = await this.client.post('/verification/start');
-    return response.data;
-  }
-
   async getProfile() {
     const response = await this.client.get('/users/me');
     return response.data;
@@ -214,6 +219,11 @@ class ApiService {
     bio?: string;
     city?: string;
     country?: string;
+    occupation?: string;
+    education?: string;
+    relationshipGoal?: string;
+    aboutMe?: string;
+    interests?: string[];
   }) {
     const response = await this.client.put('/users/me', data);
     return response.data;
@@ -229,10 +239,22 @@ class ApiService {
     return response.data;
   }
 
-  async getDiscoverProfiles(limit: number = 10) {
-    const response = await this.client.get('/users/discover', {
-      params: { limit },
-    });
+  async getDiscoverProfiles(limit: number = 10, filters?: {
+    gender?: string;
+    ageMin?: number;
+    ageMax?: number;
+    distance?: number;
+  }) {
+    const params: any = { limit };
+    if (filters) {
+      if (filters.gender && filters.gender !== 'Everyone') {
+        params.gender = filters.gender;
+      }
+      if (filters.ageMin) params.ageMin = filters.ageMin;
+      if (filters.ageMax) params.ageMax = filters.ageMax;
+      if (filters.distance) params.distance = filters.distance;
+    }
+    const response = await this.client.get('/users/discover', { params });
     return response.data;
   }
 
@@ -246,6 +268,16 @@ class ApiService {
 
   async getMatches() {
     const response = await this.client.get('/matches');
+    return response.data;
+  }
+
+  async getLikes() {
+    const response = await this.client.get('/matches/likes');
+    return response.data;
+  }
+
+  async getSentLikes() {
+    const response = await this.client.get('/matches/sent-likes');
     return response.data;
   }
 
@@ -290,8 +322,25 @@ class ApiService {
     return response.data;
   }
 
+  async completeRegistration() {
+    const response = await this.client.post('/auth/complete');
+    if (response.data.token) {
+      await this.setToken(response.data.token);
+    }
+    return response.data;
+  }
+
   async resendVerificationCode(email: string) {
     const response = await this.client.post('/auth/resend-code', { email });
+    return response.data;
+  }
+
+  // Face comparison using server-side face-api.js
+  async compareFaces(image1: string, image2: string) {
+    const response = await this.client.post('/verification/face-compare', {
+      image1,
+      image2,
+    });
     return response.data;
   }
 }

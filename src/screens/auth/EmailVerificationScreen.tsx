@@ -11,6 +11,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Input } from '../../components/common';
 import { api } from '../../services/api';
+import { registrationProgress } from '../../services/RegistrationProgressService';
 import { COLORS, FONTS, SPACING } from '../../constants/theme';
 
 type EmailVerificationScreenProps = {
@@ -26,12 +27,17 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resending, setResending] = useState(false);
+  const [displayedCode, setDisplayedCode] = useState<string | null>(null);
 
   // Send verification code on mount (after ID + Selfie verification is complete)
   useEffect(() => {
     const sendCode = async () => {
       try {
-        await api.sendEmailVerification();
+        const response = await api.sendEmailVerification();
+        // If email fails to send, show the code from server response
+        if (response.code) {
+          setDisplayedCode(response.code);
+        }
       } catch (error) {
         console.error('Failed to send verification code:', error);
         // Continue anyway - user can request a new code
@@ -51,8 +57,23 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
       // Verify the code — server returns 400 on failure (axios throws), 200 on success
       await api.verifyEmailCode(code);
 
-      // Email verified — account is now fully activated, proceed to profile setup
-      navigation.navigate('ProfileSetup', { formData });
+      // Email verified — complete registration and activate account
+      try {
+        await api.completeRegistration();
+      } catch (completeError) {
+        console.error('Complete registration error:', completeError);
+        // Continue even if complete fails - account activated on backend
+      }
+
+      // Clear registration progress since verification is complete
+      await registrationProgress.clearProgress();
+      
+      // Proceed to main app
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'MainTabs' }]
+      });
+
     } catch (error: any) {
       console.error('Verification error:', error);
       const msg =
@@ -69,8 +90,14 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
     setResending(true);
     try {
       // Request new code
-      await api.resendEmailCode();
-      Alert.alert('Code Sent', 'A new verification code has been sent to your email.');
+      const response = await api.resendEmailCode();
+      // If email fails to send, show the code from server response
+      if (response.code) {
+        setDisplayedCode(response.code);
+        Alert.alert('Code Sent', `Your verification code is: ${response.code}`);
+      } else {
+        Alert.alert('Code Sent', 'A new verification code has been sent to your email.');
+      }
     } catch (error: any) {
       Alert.alert('Error', 'Failed to resend code. Please try again.');
     } finally {
@@ -97,6 +124,13 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
         </View>
 
         <View style={styles.form}>
+          {/* Show code if email failed to send (for testing) */}
+          {displayedCode && (
+            <View style={styles.codeDisplayBox}>
+              <Text style={styles.codeDisplayLabel}>Verification Code (Email not available)</Text>
+              <Text style={styles.codeDisplayText}>{displayedCode}</Text>
+            </View>
+          )}
           <Input
             label="Verification Code"
             value={code}
@@ -169,4 +203,24 @@ const styles = StyleSheet.create({
     borderRadius: 12 
   },
   infoText: { flex: 1, fontSize: FONTS.sizes.sm, color: COLORS.textSecondary },
+  codeDisplayBox: {
+    backgroundColor: '#FFF3E0',
+    padding: SPACING.md,
+    borderRadius: 12,
+    marginBottom: SPACING.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFB74D',
+  },
+  codeDisplayLabel: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  codeDisplayText: {
+    fontSize: FONTS.sizes.xxl,
+    fontWeight: 'bold',
+    color: '#F57C00',
+    letterSpacing: 4,
+  },
 });

@@ -47,9 +47,11 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
   const handleContinue = () => {
     if (!validate()) return;
     
-    // Navigate to ID verification with email/password/phone
-    navigation.navigate('IDVerification', {
-      formData: { email, password, phone }
+    // Navigate to ProfileDetails screen with step 1 data
+    navigation.navigate('ProfileDetails', {
+      email,
+      password,
+      phone,
     });
   };
 
@@ -85,11 +87,11 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
               error={errors.phone}
             />
             <Input 
-              label="Password" 
-              value={password} 
-              onChangeText={setPassword} 
-              placeholder="Create password (min 8 chars)" 
-              secureTextEntry 
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Create password (min 8 chars)"
+              secureTextEntry
               error={errors.password} 
             />
             <Input 
@@ -102,14 +104,18 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
             />
 
             <Button title="Continue" onPress={handleContinue} loading={isLoading} size="large" />
+            
+            <View style={styles.loginContainer}>
+              <Text style={styles.loginText}>Already have an account? </Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+                <Text style={styles.loginLink}>Log In</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              Already have an account?{' '}
-              <Text style={styles.link} onPress={() => navigation.navigate('Login')}>Sign In</Text>
-            </Text>
-          </View>
+          <Text style={styles.termsText}>
+            By continuing, you agree to our Terms of Service and Privacy Policy
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -117,15 +123,62 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.white },
-  keyboardView: { flex: 1 },
-  scrollContent: { flexGrow: 1, padding: SPACING.lg },
-  backButton: { marginBottom: SPACING.lg },
-  header: { marginBottom: SPACING.xl },
-  title: { fontSize: FONTS.sizes.xxxl, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.sm },
-  subtitle: { fontSize: FONTS.sizes.md, color: COLORS.textSecondary },
-  form: { flex: 1 },
-  footer: { marginTop: SPACING.xl, alignItems: 'center' },
-  footerText: { color: COLORS.textSecondary, fontSize: FONTS.sizes.md },
-  link: { color: COLORS.primary, fontWeight: '600' },
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    padding: SPACING.lg,
+  },
+  backButton: {
+    marginBottom: SPACING.lg,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  header: {
+    marginBottom: SPACING.xl,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: SPACING.sm,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+  },
+  form: {
+    flex: 1,
+  },
+  loginContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: SPACING.lg,
+  },
+  loginText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  loginLink: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  termsText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: SPACING.lg,
+    marginBottom: SPACING.xl,
+    lineHeight: 18,
+  },
 });

@@ -3,17 +3,19 @@ module.exports = {
     {
       name: 'trustmatch-server',
       script: 'dist/index.js',
-      instances: 'max',
-      exec_mode: 'cluster',
+      instances: 1, // Use single instance to avoid rate limiter issues with clusters
+      exec_mode: 'fork',
       watch: false,
       max_memory_restart: '1G',
       env: {
         NODE_ENV: 'development',
         PORT: 3000,
+        HOST: '0.0.0.0', // Bind to all network interfaces
       },
       env_production: {
         NODE_ENV: 'production',
         PORT: 3000,
+        HOST: '0.0.0.0',
       },
       error_file: 'logs/err.log',
       out_file: 'logs/out.log',

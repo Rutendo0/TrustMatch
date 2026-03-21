@@ -1,13 +1,16 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { View, Image, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { View, StyleSheet, Platform } from 'react-native';
+import { api } from '../services/api';
 
 import { WelcomeScreen } from '../screens/auth/WelcomeScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
+import { ProfileDetailsScreen } from '../screens/auth/ProfileDetailsScreen';
+
 import { IDVerificationScreen } from '../screens/auth/IDVerificationScreen';
 import { PhotoUploadScreen } from '../screens/auth/PhotoUploadScreen';
 import { SelfieVerificationScreen } from '../screens/auth/SelfieVerificationScreen';
@@ -31,9 +34,10 @@ export type RootStackParamList = {
   Welcome: undefined;
   Login: undefined;
   Register: undefined;
+  ProfileDetails: { email: string; password: string; phone: string };
   IDVerification: { formData: any };
   PhotoUploadScreen: { formData: any };
-  SelfieVerification: { formData: any };
+  SelfieVerification: { formData?: any; idFrontImage?: string; idBackImage?: string; profilePhotos?: string[] };
   EmailVerification: { formData: any };
   ProfileSetup: { formData: any };
   MainTabs: undefined;
@@ -60,6 +64,23 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 
 const MainTabs = () => {
+  const [userPhoto, setUserPhoto] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Fetch current user profile for tab bar photo
+    const fetchUserPhoto = async () => {
+      try {
+        const profile = await api.getProfile();
+        if (profile?.photos?.length > 0) {
+          setUserPhoto(profile.photos[0].url);
+        }
+      } catch (error) {
+        console.warn('Could not fetch user photo for tab bar:', error);
+      }
+    };
+    fetchUserPhoto();
+  }, []);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -79,6 +100,17 @@ const MainTabs = () => {
               iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
               break;
             case 'Profile':
+              // Show user photo if available, otherwise show person icon
+              if (userPhoto) {
+                return (
+                  <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }}>
+                    <Image
+                      source={{ uri: userPhoto }}
+                      style={{ width: '100%', height: '100%' }}
+                    />
+                  </View>
+                );
+              }
               iconName = focused ? 'person' : 'person-outline';
               break;
             default:
@@ -115,6 +147,7 @@ export const AppNavigator = () => {
         <Stack.Screen name="Welcome" component={WelcomeScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />
+        <Stack.Screen name="ProfileDetails" component={ProfileDetailsScreen} />
         <Stack.Screen name="IDVerification" component={IDVerificationScreen} />
         <Stack.Screen name="PhotoUploadScreen" component={PhotoUploadScreen} />
         <Stack.Screen name="SelfieVerification" component={SelfieVerificationScreen} />

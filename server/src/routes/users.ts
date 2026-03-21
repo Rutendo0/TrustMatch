@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { prisma } from '../lib/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, verifiedAuthMiddleware } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 
 const router = Router();
@@ -60,6 +60,11 @@ router.put(
     body('bio').optional().trim(),
     body('city').optional().trim(),
     body('country').optional().trim(),
+    body('occupation').optional().trim(),
+    body('education').optional().trim(),
+    body('relationshipGoal').optional().trim(),
+    body('aboutMe').optional().trim(),
+    body('interests').optional().isArray(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
@@ -69,11 +74,26 @@ router.put(
       }
 
       const userId = req.userId!;
-      const { firstName, lastName, bio, city, country } = req.body;
+      const { firstName, lastName, bio, city, country, occupation, education, relationshipGoal, aboutMe, interests } = req.body;
+
+      // Convert interests array to JSON string if provided
+      const interestsJson = interests ? JSON.stringify(interests) : undefined;
 
       const user = await prisma.user.update({
         where: { id: userId },
-        data: { firstName, lastName, bio, city, country, updatedAt: new Date() },
+        data: { 
+          firstName, 
+          lastName, 
+          bio, 
+          city, 
+          country, 
+          occupation,
+          education,
+          relationshipGoal,
+          aboutMe,
+          interests: interestsJson,
+          updatedAt: new Date() 
+        },
       });
 
       return res.json({
@@ -183,10 +203,10 @@ router.put(
 );
 
 // ── GET /api/users/discover ───────────────────────────────────────────────────
-router.get('/discover', async (req: AuthRequest, res: Response) => {
+router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
-    const { limit = 10 } = req.query;
+    const { limit = 10, gender, ageMin, ageMax, distance } = req.query;
 
     const currentUser = await prisma.user.findUnique({ where: { id: userId } });
     if (!currentUser) throw new AppError('User not found', 404);
@@ -213,8 +233,18 @@ router.get('/discover', async (req: AuthRequest, res: Response) => {
       ...blockedByOthers.map((b) => b.blockerId),
     ];
 
-    const genderFilter =
-      currentUser.interestedIn === 'MALE' ? 'MALE' : 'FEMALE';
+    // Use query param if provided, otherwise use user's preference
+    let genderFilter: 'MALE' | 'FEMALE' | undefined;
+    if (gender && (gender === 'MALE' || gender === 'FEMALE')) {
+      genderFilter = gender as 'MALE' | 'FEMALE';
+    } else if (currentUser.interestedIn) {
+      genderFilter = currentUser.interestedIn as 'MALE' | 'FEMALE';
+    }
+
+    // Calculate age range
+    const birthYear = new Date().getFullYear();
+    const minBirthYear = birthYear - (ageMin ? Number(ageMin) : 100);
+    const maxBirthYear = birthYear - (ageMax ? Number(ageMax) : 18);
 
     const profiles = await prisma.user.findMany({
       where: {
@@ -222,6 +252,12 @@ router.get('/discover', async (req: AuthRequest, res: Response) => {
         isActive: true,
         verification: { isVerified: true },
         ...(genderFilter ? { gender: genderFilter } : {}),
+        ...(ageMin || ageMax ? {
+          dateOfBirth: {
+            ...(maxBirthYear ? { gte: new Date(`${maxBirthYear}-01-01`) } : {}),
+            ...(minBirthYear ? { lte: new Date(`${minBirthYear}-12-31`) } : {}),
+          }
+        } : {}),
       },
       include: {
         photos: { orderBy: { order: 'asc' } },

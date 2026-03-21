@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,31 +19,112 @@ import { Button, Card, VerifiedBadge } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP, wp, hp } from '../../hooks/useResponsive';
 import { ErrorBoundary } from '../../components/common/ErrorBoundary';
+import { api } from '../../services/api';
 
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [showDistance, setShowDistance] = useState(true);
   const { isSmall, isTablet } = useResponsive();
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [likesCount, setLikesCount] = useState(0);
+  const [matchesCount, setMatchesCount] = useState(0);
 
+  useEffect(() => {
+    fetchProfile();
+    fetchLikesAndMatches();
+  }, []);
 
-
-  const user = {
-    name: 'Alex Johnson',
-    age: 28,
-    bio: 'Software developer by day, adventurer by heart. Love hiking, photography, and good conversations.',
-    photos: [
-      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
-      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400',
-    ],
-    isVerified: true,
-    location: 'San Francisco, CA',
-    preferences: {
-      ageRange: { min: 24, max: 35 },
-      distance: 25,
-      showMe: 'Women',
-    },
+  const fetchProfile = async () => {
+    try {
+      const profileData = await api.getProfile();
+      setUser(profileData);
+    } catch (error) {
+      console.error('Failed to fetch profile:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const fetchLikesAndMatches = async () => {
+    try {
+      const [likes, matches] = await Promise.all([
+        api.getLikes(),
+        api.getMatches()
+      ]);
+      setLikesCount(Array.isArray(likes) ? likes.length : 0);
+      setMatchesCount(Array.isArray(matches) ? matches.length : 0);
+    } catch (error) {
+      console.error('Failed to fetch likes/matches:', error);
+    }
+  };
+
+  // Helper to compute age from dateOfBirth
+  const calculateAge = (dateOfBirth: string) => {
+    if (!dateOfBirth) return null;
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  // Helper to get user display name
+  const getUserName = () => {
+    if (!user) return 'User';
+    if (user.firstName && user.lastName) {
+      return `${user.firstName} ${user.lastName}`;
+    }
+    return user.firstName || 'User';
+  };
+
+  // Helper to get user location
+  const getUserLocation = () => {
+    if (!user) return 'Location not set';
+    if (user.city && user.country) {
+      return `${user.city}, ${user.country}`;
+    }
+    return user.city || user.country || 'Location not set';
+  };
+
+  // Helper to get user age
+  const getUserAge = () => {
+    if (!user || !user.dateOfBirth) return null;
+    return calculateAge(user.dateOfBirth);
+  };
+
+  // Helper to check if verified
+  const isUserVerified = () => {
+    if (!user) return false;
+    return user.verification?.isVerified || false;
+  };
+
+  // Helper to get first photo
+  const getFirstPhoto = () => {
+    if (!user || !user.photos || user.photos.length === 0) return null;
+    return user.photos[0]?.url || null;
+  };
+
+  // Helper to get all photos
+  const getAllPhotos = () => {
+    if (!user || !user.photos || user.photos.length === 0) return [];
+    return user.photos.map((p: any) => p?.url).filter(Boolean);
+  };
+
+  // Show loading state
+  if (loading || !user) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const menuItems = [
     { icon: 'settings-outline', label: 'Settings', route: 'Settings' },
@@ -83,7 +164,7 @@ export const ProfileScreen: React.FC = () => {
           <View style={styles.profileSection}>
             <View style={styles.photoContainer}>
               <Image 
-                source={{ uri: user.photos[0] }} 
+                source={{ uri: getFirstPhoto() || 'https://via.placeholder.com/150' }} 
                 style={[
                   styles.mainPhoto,
                   { width: photoSize, height: photoSize, borderRadius: photoSize / 2 }
@@ -108,29 +189,29 @@ export const ProfileScreen: React.FC = () => {
 
             <View style={styles.nameSection}>
               <View style={styles.nameRow}>
-                <Text style={styles.name}>{user.name}, {user.age}</Text>
-                <VerifiedBadge isVerified={user.isVerified} showLabel size="medium" />
+                <Text style={styles.name}>{getUserName()}{getUserAge() ? `, ${getUserAge()}` : ''}</Text>
+                <VerifiedBadge isVerified={isUserVerified()} showLabel size="medium" />
               </View>
               <Text style={styles.location}>
-                <Ionicons name="location" size={normalize(14)} color={COLORS.textSecondary} /> {user.location}
+                <Ionicons name="location" size={normalize(14)} color={COLORS.textSecondary} /> {getUserLocation()}
               </Text>
             </View>
 
-            <Text style={styles.bio}>{user.bio}</Text>
+            <Text style={styles.bio}>{user.bio || 'No bio added yet. Tap edit to add your bio!'}</Text>
 
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>156</Text>
+                <Text style={styles.statValue}>{likesCount}</Text>
                 <Text style={styles.statLabel}>Likes</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>42</Text>
+                <Text style={styles.statValue}>{matchesCount}</Text>
                 <Text style={styles.statLabel}>Matches</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>89%</Text>
+                <Text style={styles.statValue}>{user?.trustScore || user?.verification?.trustScore || 0}%</Text>
                 <Text style={styles.statLabel}>Profile Score</Text>
               </View>
             </View>
@@ -150,15 +231,27 @@ export const ProfileScreen: React.FC = () => {
             </View>
             <View style={styles.verificationBadges}>
               <View style={styles.badgeItem}>
-                <Ionicons name="checkmark-circle" size={normalize(16)} color={COLORS.success} />
+                <Ionicons 
+                  name={user?.verification?.idVerified ? "checkmark-circle" : "close-circle"} 
+                  size={normalize(16)} 
+                  color={user?.verification?.idVerified ? COLORS.success : COLORS.textSecondary} 
+                />
                 <Text style={styles.badgeText}>ID Verified</Text>
               </View>
               <View style={styles.badgeItem}>
-                <Ionicons name="checkmark-circle" size={normalize(16)} color={COLORS.success} />
+                <Ionicons 
+                  name={user?.verification?.selfieVerified ? "checkmark-circle" : "close-circle"} 
+                  size={normalize(16)} 
+                  color={user?.verification?.selfieVerified ? COLORS.success : COLORS.textSecondary} 
+                />
                 <Text style={styles.badgeText}>Selfie Matched</Text>
               </View>
               <View style={styles.badgeItem}>
-                <Ionicons name="checkmark-circle" size={normalize(16)} color={COLORS.success} />
+                <Ionicons 
+                  name={user?.phone ? "checkmark-circle" : "close-circle"} 
+                  size={normalize(16)} 
+                  color={user?.phone ? COLORS.success : COLORS.textSecondary} 
+                />
                 <Text style={styles.badgeText}>Phone Verified</Text>
               </View>
             </View>
@@ -172,15 +265,14 @@ export const ProfileScreen: React.FC = () => {
               hitSlop={HIT_SLOP}
               accessibilityRole="button"
               onPress={() => {
-                // TODO: Navigate to preferences edit screen
-                // Show Me preferences functionality will be implemented here
+                navigation.navigate('Filters');
               }}
             >
               <View style={styles.preferenceLabel}>
                 <Ionicons name="people" size={normalize(20)} color={COLORS.textSecondary} />
                 <Text style={styles.preferenceText}>Show Me</Text>
               </View>
-              <Text style={styles.preferenceValue}>{user.preferences.showMe}</Text>
+              <Text style={styles.preferenceValue}>{user.preferences?.showMe || 'Everyone'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
@@ -188,8 +280,7 @@ export const ProfileScreen: React.FC = () => {
               hitSlop={HIT_SLOP}
               accessibilityRole="button"
               onPress={() => {
-                // TODO: Navigate to preferences edit screen
-                // Age Range preferences functionality will be implemented here
+                navigation.navigate('Filters');
               }}
             >
               <View style={styles.preferenceLabel}>
@@ -197,7 +288,7 @@ export const ProfileScreen: React.FC = () => {
                 <Text style={styles.preferenceText}>Age Range</Text>
               </View>
               <Text style={styles.preferenceValue}>
-                {user.preferences.ageRange.min} - {user.preferences.ageRange.max}
+                {user.preferences?.ageRange?.min || 18} - {user.preferences?.ageRange?.max || 50}
               </Text>
             </TouchableOpacity>
 
@@ -206,16 +297,33 @@ export const ProfileScreen: React.FC = () => {
               hitSlop={HIT_SLOP}
               accessibilityRole="button"
               onPress={() => {
-                // TODO: Navigate to preferences edit screen
-                // Distance preferences functionality will be implemented here
+                navigation.navigate('Filters');
               }}
             >
               <View style={styles.preferenceLabel}>
                 <Ionicons name="location" size={normalize(20)} color={COLORS.textSecondary} />
                 <Text style={styles.preferenceText}>Maximum Distance</Text>
               </View>
-              <Text style={styles.preferenceValue}>{user.preferences.distance} km</Text>
+              <Text style={styles.preferenceValue}>{user.preferences?.distance || 25} km</Text>
             </TouchableOpacity>
+          </Card>
+
+          {/* My Photos Section */}
+          <Card style={styles.preferencesCard}>
+            <Text style={styles.sectionTitle}>My Photos</Text>
+            <View style={styles.photosGrid}>
+              {getAllPhotos().map((photoUrl: string, index: number) => (
+                <TouchableOpacity key={index} style={styles.photoItem}>
+                  <Image
+                    source={{ uri: photoUrl }}
+                    style={styles.photoThumbnail}
+                  />
+                </TouchableOpacity>
+              ))}
+              {getAllPhotos().length === 0 && (
+                <Text style={styles.emptyText}>No photos added yet</Text>
+              )}
+            </View>
           </Card>
 
           <Card style={styles.settingsCard}>
@@ -328,6 +436,16 @@ export const ProfileScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    fontSize: normalize(FONTS.sizes.md),
+    color: COLORS.textSecondary,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -508,6 +626,28 @@ const styles = StyleSheet.create({
     paddingVertical: normalize(SPACING.sm),
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+  },
+  photosGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: normalize(SPACING.sm),
+  },
+  photoItem: {
+    width: normalize(80),
+    height: normalize(80),
+    borderRadius: normalize(8),
+    overflow: 'hidden',
+  },
+  photoThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  emptyText: {
+    fontSize: normalize(FONTS.sizes.sm),
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    width: '100%',
+    paddingVertical: normalize(SPACING.md),
   },
   preferenceLabel: {
     flexDirection: 'row',

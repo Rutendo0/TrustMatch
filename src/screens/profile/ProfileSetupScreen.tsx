@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { api } from '../../services/api';
 import {
   View,
   Text,
@@ -24,7 +25,8 @@ interface Interest {
   id: string;
   name: string;
   icon: string;
-  category: 'hobby' | 'music' | 'sports' | 'food' | 'travel' | 'art' | 'fitness' | 'technology';
+  category: 'hobby' | 'music' | 'sports' | 'food' | 'travel' | 'art' | 'fitness' | 'technology' | 'other';
+  isCustom?: boolean;
 }
 
 const AVAILABLE_INTERESTS: Interest[] = [
@@ -71,6 +73,9 @@ const AVAILABLE_INTERESTS: Interest[] = [
   { id: '28', name: 'Coding', icon: 'code', category: 'technology' },
   { id: '29', name: 'AI & Tech', icon: 'hardware-chip', category: 'technology' },
   { id: '30', name: 'Social Media', icon: 'share-social', category: 'technology' },
+  
+  // Other - Custom
+  { id: 'other', name: 'Other', icon: 'add-circle', category: 'other', isCustom: true },
 ];
 
 const CATEGORIES = [
@@ -82,6 +87,7 @@ const CATEGORIES = [
   { key: 'travel', label: 'Travel', icon: 'airplane' },
   { key: 'art', label: 'Arts', icon: 'color-palette' },
   { key: 'technology', label: 'Technology', icon: 'hardware-chip' },
+  { key: 'other', label: 'Other', icon: 'add-circle' },
 ];
 
 export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
@@ -90,6 +96,9 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
 }) => {
   const { formData } = route.params as { formData: any };
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
+  const [customInterests, setCustomInterests] = useState<string[]>([]);
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customInterestText, setCustomInterestText] = useState('');
   const [bio, setBio] = useState('');
   const [occupation, setOccupation] = useState('');
   const [education, setEducation] = useState('');
@@ -99,7 +108,13 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
 
   const steps = ['About You', 'Interests & Hobbies', 'Lifestyle', 'Goals & Values'];
 
-  const toggleInterest = (interestId: string) => {
+  const toggleInterest = (interestId: string, interestName?: string) => {
+    // Handle custom interest "Other" button
+    if (interestId === 'other') {
+      setShowCustomInput(true);
+      return;
+    }
+    
     setSelectedInterests(prev => {
       if (prev.includes(interestId)) {
         return prev.filter(id => id !== interestId);
@@ -112,19 +127,60 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
     });
   };
 
+  const addCustomInterest = () => {
+    if (customInterestText.trim() && selectedInterests.length < 12) {
+      const newInterest = customInterestText.trim();
+      setCustomInterests(prev => [...prev, newInterest]);
+      setSelectedInterests(prev => [...prev, `custom_${newInterest}`]);
+      setCustomInterestText('');
+      setShowCustomInput(false);
+    } else if (selectedInterests.length >= 12) {
+      Alert.alert('Maximum Reached', 'You can select up to 12 interests.');
+    }
+  };
+
+  const removeCustomInterest = (interest: string) => {
+    setCustomInterests(prev => prev.filter(i => i !== interest));
+    setSelectedInterests(prev => prev.filter(id => id !== `custom_${interest}`));
+  };
+
   const getFilteredInterests = (category: string) => {
     return AVAILABLE_INTERESTS.filter(interest => interest.category === category);
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // Complete setup
+      // Combine regular and custom interests
+      const allInterests = [...selectedInterests, ...customInterests];
+      
+      // Save profile data to server
+      try {
+        await api.updateProfile({
+          bio,
+          occupation,
+          education,
+          relationshipGoal,
+          aboutMe,
+          interests: allInterests,
+        });
+        
+        console.log('Profile saved successfully');
+        Alert.alert('Success', 'Your profile has been saved!');
+      } catch (error: any) {
+        console.error('Failed to save profile:', error);
+        // Show user-friendly error message
+        const errorMessage = error?.response?.data?.error || 'Failed to save profile. Please try again.';
+        Alert.alert('Save Error', errorMessage);
+      }
+      
+      // Complete setup - navigate to main tabs
       navigation.navigate('MainTabs', {
         profileData: {
           ...formData,
-          interests: selectedInterests,
+          interests: allInterests,
+          customInterests: customInterests,
           bio,
           occupation,
           education,
@@ -211,7 +267,7 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
                           styles.interestChip,
                           selectedInterests.includes(interest.id) && styles.interestChipSelected
                         ]}
-                        onPress={() => toggleInterest(interest.id)}
+                        onPress={() => toggleInterest(interest.id, interest.name)}
                       >
                         <Ionicons 
                           name={interest.icon as any} 
@@ -230,6 +286,44 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
                 </View>
               ))}
             </View>
+
+            {/* Custom Interests Input */}
+            {showCustomInput && (
+              <View style={styles.customInterestContainer}>
+                <TextInput
+                  style={styles.customInterestInput}
+                  placeholder="Enter your interest..."
+                  value={customInterestText}
+                  onChangeText={setCustomInterestText}
+                  onSubmitEditing={addCustomInterest}
+                />
+                <TouchableOpacity 
+                  style={styles.customInterestButton}
+                  onPress={addCustomInterest}
+                >
+                  <Text style={styles.customInterestButtonText}>Add</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Show Custom Interests */}
+            {customInterests.length > 0 && (
+              <View style={styles.customInterestsDisplay}>
+                <Text style={styles.customInterestsLabel}>Your custom interests:</Text>
+                <View style={styles.customInterestsList}>
+                  {customInterests.map((interest, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.customInterestChip}
+                      onPress={() => removeCustomInterest(interest)}
+                    >
+                      <Text style={styles.customInterestChipText}>{interest}</Text>
+                      <Ionicons name="close-circle" size={16} color={COLORS.primary} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
             
             <Text style={styles.interestsCount}>
               {selectedInterests.length}/12 interests selected
@@ -501,6 +595,57 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     marginTop: SPACING.lg,
+  },
+  customInterestContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.md,
+    gap: SPACING.sm,
+  },
+  customInterestInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    fontSize: FONTS.sizes.md,
+  },
+  customInterestButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.sm,
+  },
+  customInterestButtonText: {
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  customInterestsDisplay: {
+    marginTop: SPACING.md,
+  },
+  customInterestsLabel: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+  },
+  customInterestsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  customInterestChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary + '20',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.lg,
+    gap: SPACING.xs,
+  },
+  customInterestChipText: {
+    color: COLORS.primary,
+    fontSize: FONTS.sizes.sm,
   },
   goalOptions: {
     gap: SPACING.sm,

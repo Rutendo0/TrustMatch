@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Card, VerifiedBadge } from '../../components/common';
+import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -120,8 +121,71 @@ type TabType = 'received' | 'sent';
 export const LikesScreen: React.FC = () => {
   const [isPremium] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('received');
-  const visibleLikes = isPremium ? MOCK_LIKES : MOCK_LIKES.slice(0, 1);
-  const blurredCount = isPremium ? 0 : MOCK_LIKES.length - 1;
+  const [receivedLikes, setReceivedLikes] = useState<LikeProfile[]>([]);
+  const [sentLikes, setSentLikes] = useState<LikeProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchLikes();
+  }, []);
+
+  const fetchLikes = async () => {
+    try {
+      // Fetch both received and sent likes
+      const [received, sent] = await Promise.all([
+        api.getLikes(),
+        api.getSentLikes()
+      ]);
+      
+      // Map received likes
+      const mappedReceived: LikeProfile[] = (received || []).map((user: any) => ({
+        id: user.id,
+        name: user.firstName || 'User',
+        age: user.age || 25,
+        photo: user.photos?.[0] || 'https://via.placeholder.com/300',
+        isVerified: user.isVerified || false,
+        likedAt: formatTime(user.likedAt),
+        isBlurred: false,
+      }));
+      setReceivedLikes(mappedReceived);
+      
+      // Map sent likes
+      const mappedSent: LikeProfile[] = (sent || []).map((user: any) => ({
+        id: user.id,
+        name: user.firstName || 'User',
+        age: user.age || 25,
+        photo: user.photos?.[0] || 'https://via.placeholder.com/300',
+        isVerified: user.isVerified || false,
+        likedAt: formatTime(user.likedAt),
+        isBlurred: false,
+      }));
+      setSentLikes(mappedSent);
+    } catch (error) {
+      console.error('Failed to fetch likes:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get the current list based on active tab
+  const currentLikes = activeTab === 'received' ? receivedLikes : sentLikes;
+
+  const formatTime = (dateString?: string) => {
+    if (!dateString) return 'Recently';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (hours < 1) return 'Just now';
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  const visibleLikes = isPremium ? currentLikes : currentLikes.slice(0, 1);
+  const blurredCount = isPremium ? 0 : Math.max(0, currentLikes.length - 1);
 
   const renderProfileCard = (profile: LikeProfile, index: number, isReceived: boolean) => {
     const isBlurred = isReceived && !isPremium && index > 0;

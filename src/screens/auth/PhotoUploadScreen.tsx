@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { Button } from '../../components/common';
 import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 import { useDeviceFingerprint } from '../../hooks/useDeviceFingerprint';
+import { registrationProgress } from '../../services/RegistrationProgressService';
 
 type PhotoUploadScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -32,11 +33,28 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
   navigation,
   route,
 }) => {
-  const { formData } = route.params as { formData: any };
+  const { formData } = route.params as { formData?: any };
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const deviceFingerprint = useDeviceFingerprint();
+
+  // Load saved progress on mount
+  useEffect(() => {
+    const loadProgress = async () => {
+      const progress = await registrationProgress.getProgress();
+      if (progress && progress.formData) {
+        // Restore saved photos if any
+        if (progress.formData.photos && progress.formData.photos.length > 0) {
+          setPhotos(progress.formData.photos.map((uri: string, index: number) => ({
+            uri,
+            id: `restored_${index}`,
+          })));
+        }
+      }
+    };
+    loadProgress();
+  }, []);
 
   const handleContinue = async () => {
     if (photos.length === 0) {
@@ -48,15 +66,18 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       setIsRegistering(true);
       
       // Register the user in the backend after ID verification passed
+      // Use gender from formData or extracted from ID document
+      const userGender = formData?.gender || formData?.extractedData?.gender;
       await api.register({
-        email: formData.email,
-        phone: formData.phone,
-        password: formData.password,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        dateOfBirth: formData.dateOfBirth,
-        gender: formData.gender,
-        interestedIn: formData.gender === 'MALE' ? 'FEMALE' : 'MALE',
+        email: formData?.email,
+        phone: formData?.phone,
+        password: formData?.password,
+
+        firstName: formData?.firstName,
+        lastName: formData?.lastName,
+        dateOfBirth: formData?.dateOfBirth,
+        gender: userGender || 'MALE',
+        interestedIn: userGender === 'MALE' ? 'FEMALE' : 'MALE',
         deviceFingerprint: deviceFingerprint.fingerprint || 'unknown',
         platform: 'mobile',
       });
@@ -65,8 +86,8 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       for (const photo of photos) {
         try {
           await api.uploadProfilePhoto(photo.uri);
-        } catch (uploadError) {
-          console.error('Photo upload error:', uploadError);
+        } catch (uploadError: any) {
+          console.error('Photo upload error:', uploadError?.response?.data || uploadError?.message);
           // Continue — don't block registration if one photo fails
         }
       }
@@ -75,8 +96,9 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
         formData: { ...formData, photos: photos.map(p => p.uri) }
       });
     } catch (error: any) {
-      console.error('Registration error:', error);
-      Alert.alert('Registration Error', error.message || 'Failed to create account. Please try again.');
+      console.error('Registration error full:', error?.response?.data || error);
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to create account. Please try again.';
+      Alert.alert('Registration Error', errorMessage);
     } finally {
       setIsRegistering(false);
     }
@@ -104,7 +126,13 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       };
       
       if (photos.length < 6) {
-        setPhotos([...photos, newPhoto]);
+        const newPhotos = [...photos, newPhoto];
+        setPhotos(newPhotos);
+        // Save progress
+        await registrationProgress.saveProgress('photos', {
+          ...formData,
+          photos: newPhotos.map(p => p.uri),
+        });
       } else {
         Alert.alert('Maximum Photos', 'You can only upload up to 6 photos.');
       }
@@ -123,11 +151,21 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
 
     setIsUploading(true);
     
+    // Save progress before moving to selfie
+    await registrationProgress.saveProgress('selfie', {
+      ...formData,
+      photos: photos.map(p => p.uri),
+    });
+    
     // Simulate photo processing
     setTimeout(() => {
       setIsUploading(false);
+      // Pass all photos for comprehensive face matching
       navigation.navigate('SelfieVerification', { 
-        formData: { ...formData, photos: photos.map(p => p.uri) } 
+        formData: { ...formData, photos: photos.map(p => p.uri) },
+        idFrontImage: formData?.idFrontImage,
+        idBackImage: formData?.idBackImage,
+        profilePhotos: photos.map(p => p.uri),
       });
     }, 2000);
   };

@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
 import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
-import { v4 as uuidv4 } from 'uuid';
+
+// Simple UUID generator without external dependency
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 
 export const useDeviceFingerprint = () => {
   const [fingerprint, setFingerprint] = useState<string | null>(null);
@@ -31,7 +39,14 @@ export const useDeviceFingerprint = () => {
         };
         
         const dataString = JSON.stringify(deviceData);
-        storedFingerprint = uuidv4() + '-' + hashCode(dataString);
+        // Simple hash function
+        let hash = 0;
+        for (let i = 0; i < dataString.length; i++) {
+          const char = dataString.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash;
+        }
+        storedFingerprint = generateUUID() + '-' + Math.abs(hash).toString(16);
         
         await SecureStore.setItemAsync('deviceFingerprint', storedFingerprint);
       }
@@ -44,20 +59,16 @@ export const useDeviceFingerprint = () => {
       });
     } catch (error) {
       console.error('Failed to generate device fingerprint:', error);
-      const fallbackId = uuidv4();
+      // Use a simple fallback
+      const fallbackId = generateUUID();
       setFingerprint(fallbackId);
+      setDeviceInfo({
+        platform: 'unknown',
+        osVersion: 'unknown',
+        deviceName: 'unknown',
+      });
     }
   };
 
   return { fingerprint, deviceInfo };
 };
-
-function hashCode(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(16);
-}

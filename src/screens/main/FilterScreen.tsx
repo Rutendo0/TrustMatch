@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Card, Button } from '../../components/common';
+import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 
@@ -107,8 +108,39 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     setHasChanges(false);
   };
 
-  const applyFilters = () => {
-    // Applying filters functionality
+  // Load current preferences on mount
+  useEffect(() => {
+    loadPreferences();
+  }, []);
+
+  const loadPreferences = async () => {
+    try {
+      const profile = await api.getProfile();
+      if (profile.preferences) {
+        setFilters(prev => ({
+          ...prev,
+          ageRange: [profile.preferences.ageRangeMin || 18, profile.preferences.ageRangeMax || 99],
+          maxDistance: profile.preferences.maxDistance || 25,
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to load preferences:', error);
+    }
+  };
+
+  const applyFilters = async () => {
+    try {
+      // Save preferences to server
+      await api.updatePreferences({
+        ageRangeMin: filters.ageRange[0],
+        ageRangeMax: filters.ageRange[1],
+        maxDistance: filters.maxDistance,
+        interestedIn: filters.showMe === 'Everyone' ? undefined : filters.showMe,
+      });
+      console.log('Preferences saved successfully');
+    } catch (error) {
+      console.error('Failed to save preferences:', error);
+    }
     setHasChanges(false);
     navigation.goBack();
   };

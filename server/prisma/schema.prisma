@@ -8,63 +8,65 @@ datasource db {
 }
 
 model User {
-  id                String    @id @default(uuid())
-  clerkId           String?   @unique  // Clerk user ID
-  email             String    @unique
-  phone             String    @unique
-  passwordHash      String
-  firstName         String
-  lastName          String
-  dateOfBirth       DateTime
-  gender            Gender
-  interestedIn      InterestedIn
-  bio               String?
-  city              String?
-  country           String?
-  latitude          Float?
-  longitude         Float?
-
-  role              UserRole  @default(USER)
-
-  verification       Verification?
-  deviceFingerprints DeviceFingerprint[]
-  photos             Photo[]
-  sentSwipes         Swipe[]             @relation("SentSwipes")
-  receivedSwipes     Swipe[]             @relation("ReceivedSwipes")
-  matches1           Match[]             @relation("MatchUser1")
-  matches2           Match[]             @relation("MatchUser2")
-  sentMessages       Message[]           @relation("SentMessages")
-  voiceNotes         VoiceNote[]
-  createdEvents      Event[]
-  eventAttendees     EventAttendee[]
-  dateJournals       DateJournal[]
-  reviewsGiven       VerifiedReview[]    @relation("ReviewsGiven")
-  reviewsReceived    VerifiedReview[]    @relation("ReviewsReceived")
-  primaryRelationship  RelationshipMode? @relation("PrimaryUser")
-  partnerRelationship  RelationshipMode? @relation("PartnerUser")
-  reportsMade        UserReport[]        @relation("ReportsMade")
-  reportsReceived    UserReport[]        @relation("ReportsReceived")
-  blockedUsers       UserBlock[]         @relation("BlockingUser")
-  blockedBy          UserBlock[]         @relation("BlockedUser")
-  refreshTokens      RefreshToken[]
-
-  ageRangeMin       Int       @default(18)
-  ageRangeMax       Int       @default(50)
-  maxDistance       Int       @default(50)
-
-  isActive          Boolean   @default(true)
-  lastActive        DateTime  @default(now())
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                  String              @id @default(uuid())
+  email               String              @unique
+  phone               String              @unique
+  passwordHash        String
+  firstName           String
+  lastName            String
+  dateOfBirth         DateTime
+  gender              Gender
+  interestedIn        InterestedIn
+  bio                 String?
+  occupation          String?
+  education           String?
+  relationshipGoal    String?
+  aboutMe             String?
+  interests           String?  // Stored as JSON string array
+  city                String?
+  country             String?
+  latitude            Float?
+  longitude           Float?
+  role                UserRole            @default(USER)
+  ageRangeMin         Int                 @default(18)
+  ageRangeMax         Int                 @default(50)
+  maxDistance         Int                 @default(50)
+  isActive            Boolean             @default(true)
+  lastActive          DateTime            @default(now())
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  clerkId             String?             @unique
+  status              UserStatus          @default(PENDING)
+  dateJournals        DateJournal[]
+  deviceFingerprints  DeviceFingerprint[]
+  createdEvents       Event[]
+  eventAttendees      EventAttendee[]
+  matches1            Match[]             @relation("MatchUser1")
+  matches2            Match[]             @relation("MatchUser2")
+  sentMessages        Message[]           @relation("SentMessages")
+  photos              Photo[]
+  refreshTokens       RefreshToken[]
+  partnerRelationship RelationshipMode?   @relation("PartnerUser")
+  primaryRelationship RelationshipMode?   @relation("PrimaryUser")
+  receivedSwipes      Swipe[]             @relation("ReceivedSwipes")
+  sentSwipes          Swipe[]             @relation("SentSwipes")
+  blockedBy           UserBlock[]         @relation("BlockedUser")
+  blockedUsers        UserBlock[]         @relation("BlockingUser")
+  reportsReceived     UserReport[]        @relation("ReportsReceived")
+  reportsMade         UserReport[]        @relation("ReportsMade")
+  verification        Verification?
+  reviewsReceived     VerifiedReview[]    @relation("ReviewsReceived")
+  reviewsGiven        VerifiedReview[]    @relation("ReviewsGiven")
+  voiceNotes          VoiceNote[]
 }
 
 model RefreshToken {
   id        String   @id @default(uuid())
   token     String   @unique
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([token])
@@ -73,134 +75,114 @@ model RefreshToken {
 model UserBlock {
   id        String   @id @default(uuid())
   blockerId String
-  blocker   User     @relation("BlockingUser", fields: [blockerId], references: [id], onDelete: Cascade)
   blockedId String
-  blocked   User     @relation("BlockedUser", fields: [blockedId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+  blocked   User     @relation("BlockedUser", fields: [blockedId], references: [id], onDelete: Cascade)
+  blocker   User     @relation("BlockingUser", fields: [blockerId], references: [id], onDelete: Cascade)
 
   @@unique([blockerId, blockedId])
   @@index([blockerId])
 }
 
 model Verification {
-  id              String    @id @default(uuid())
-  userId          String    @unique
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  isVerified      Boolean   @default(false)
-  idVerified      Boolean   @default(false)
-  selfieVerified  Boolean   @default(false)
-  emailVerified   Boolean   @default(false)
-  phoneVerified   Boolean   @default(false)
-
-  // Email verification code (temporary)
-  emailCode       String?
-  emailCodeExpiry DateTime?
-
+  id              String          @id @default(uuid())
+  userId          String          @unique
+  isVerified      Boolean         @default(false)
+  idVerified      Boolean         @default(false)
+  selfieVerified  Boolean         @default(false)
+  emailVerified   Boolean         @default(false)
+  phoneVerified   Boolean         @default(false)
   idDocumentType  IDDocumentType?
   idDocumentUrl   String?
   selfieUrl       String?
   faceMatchScore  Float?
   livenessScore   Float?
-
-  // Jumio KYX Platform fields
-  jumioAccountId    String?
-  jumioWorkflowId   String?
-  jumioDecision     String?   // PASSED | REJECTED | WARNING
-  jumioRawResponse  String?   // JSON string of last Jumio webhook payload
-
   verifiedAt      DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  emailCode       String?
+  emailCodeExpiry DateTime?
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model DeviceFingerprint {
-  id              String    @id @default(uuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  deviceId        String
-  platform        String
-  osVersion       String?
-  appVersion      String?
-  ipAddress       String?
-
-  isBlocked       Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  lastUsedAt      DateTime  @default(now())
+  id         String   @id @default(uuid())
+  userId     String
+  deviceId   String
+  platform   String
+  osVersion  String?
+  appVersion String?
+  ipAddress  String?
+  isBlocked  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([deviceId, userId])
   @@index([deviceId])
 }
 
 model Photo {
-  id          String    @id @default(uuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  url         String
-  order       Int       @default(0)
-  isMain      Boolean   @default(false)
-
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        String   @id @default(uuid())
+  userId    String
+  url       String
+  order     Int      @default(0)
+  isMain    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Swipe {
-  id            String    @id @default(uuid())
-  swiperId      String
-  swiper        User      @relation("SentSwipes", fields: [swiperId], references: [id], onDelete: Cascade)
-  swipedId      String
-  swiped        User      @relation("ReceivedSwipes", fields: [swipedId], references: [id], onDelete: Cascade)
-
-  action        SwipeAction
-  createdAt     DateTime  @default(now())
+  id        String      @id @default(uuid())
+  swiperId  String
+  swipedId  String
+  action    SwipeAction
+  createdAt DateTime    @default(now())
+  swiped    User        @relation("ReceivedSwipes", fields: [swipedId], references: [id], onDelete: Cascade)
+  swiper    User        @relation("SentSwipes", fields: [swiperId], references: [id], onDelete: Cascade)
 
   @@unique([swiperId, swipedId])
   @@index([swipedId])
 }
 
 model Match {
-  id          String    @id @default(uuid())
-  user1Id     String
-  user1       User      @relation("MatchUser1", fields: [user1Id], references: [id], onDelete: Cascade)
-  user2Id     String
-  user2       User      @relation("MatchUser2", fields: [user2Id], references: [id], onDelete: Cascade)
-
-  messages    Message[]
+  id           String           @id @default(uuid())
+  user1Id      String
+  user2Id      String
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
   dateJournals DateJournal[]
-  reviews     VerifiedReview[]
-
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
+  user1        User             @relation("MatchUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2        User             @relation("MatchUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages     Message[]
+  reviews      VerifiedReview[]
 
   @@unique([user1Id, user2Id])
 }
 
 model Message {
-  id          String    @id @default(uuid())
-  matchId     String
-  match       Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  senderId    String
-  sender      User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-
-  content     String
-  type        MessageType @default(TEXT)
-  status      MessageStatus?
-
-  readAt      DateTime?
-  createdAt   DateTime  @default(now())
+  id        String         @id @default(uuid())
+  matchId   String
+  senderId  String
+  content   String
+  type      MessageType    @default(TEXT)
+  readAt    DateTime?
+  createdAt DateTime       @default(now())
+  match     Match          @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  sender    User           @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  status    MessageStatus?
 
   @@index([matchId])
 }
 
 model BlockedAccount {
-  id              String    @id @default(uuid())
-  email           String?
-  phone           String?
-  deviceId        String?
-  reason          String
-  blockedAt       DateTime  @default(now())
+  id        String   @id @default(uuid())
+  email     String?
+  phone     String?
+  deviceId  String?
+  reason    String
+  blockedAt DateTime @default(now())
 
   @@index([email])
   @@index([phone])
@@ -208,56 +190,47 @@ model BlockedAccount {
 }
 
 model VoiceNote {
-  id          String    @id @default(uuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  audioUrl    String
-  duration    Int       // in seconds
-  transcript  String?
-  prompt      String?   // what this voice note is in response to
-
-  isActive    Boolean   @default(true)
-  playCount   Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id         String   @id @default(uuid())
+  userId     String
+  audioUrl   String
+  duration   Int
+  transcript String?
+  prompt     String?
+  isActive   Boolean  @default(true)
+  playCount  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([createdAt])
 }
 
 model Event {
-  id              String    @id @default(uuid())
-  creatorId       String
-  creator         User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-
-  title           String
-  description     String
-  category        EventCategory
-  eventType       EventType
-
-  venueName       String?
-  address         String?
-  latitude        Float?
-  longitude       Float?
-  isVirtual       Boolean   @default(false)
-
-  startDateTime   DateTime
-  endDateTime     DateTime
-  timezone        String    @default("UTC")
-
-  maxAttendees    Int?
-  isPublic        Boolean   @default(true)
-  requiresApproval Boolean  @default(false)
-
-  interestTags    String[]
-  imageUrl        String?
-
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  attendees       EventAttendee[]
+  id               String          @id @default(uuid())
+  creatorId        String
+  title            String
+  description      String
+  category         EventCategory
+  eventType        EventType
+  venueName        String?
+  address          String?
+  latitude         Float?
+  longitude        Float?
+  isVirtual        Boolean         @default(false)
+  startDateTime    DateTime
+  endDateTime      DateTime
+  timezone         String          @default("UTC")
+  maxAttendees     Int?
+  isPublic         Boolean         @default(true)
+  requiresApproval Boolean         @default(false)
+  interestTags     String[]
+  imageUrl         String?
+  isActive         Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  creator          User            @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  attendees        EventAttendee[]
 
   @@index([creatorId])
   @@index([category])
@@ -267,14 +240,13 @@ model Event {
 }
 
 model EventAttendee {
-  id              String    @id @default(uuid())
-  eventId         String
-  event           Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  status          AttendeeStatus @default(PENDING)
-  joinedAt        DateTime  @default(now())
+  id       String         @id @default(uuid())
+  eventId  String
+  userId   String
+  status   AttendeeStatus @default(PENDING)
+  joinedAt DateTime       @default(now())
+  event    Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([eventId, userId])
   @@index([eventId])
@@ -282,26 +254,22 @@ model EventAttendee {
 }
 
 model DateJournal {
-  id              String    @id @default(uuid())
-  matchId         String
-  match           Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  dateTitle       String?
-  dateLocation    String?
-  dateTime        DateTime?
-
-  notes           String?
-  moodRating      Int?
-  wouldSeeAgain   Boolean?
-
-  memoryTags      String[]
-  photoUrls       String[]
-
-  isPrivate       Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id            String    @id @default(uuid())
+  matchId       String
+  userId        String
+  dateTitle     String?
+  dateLocation  String?
+  dateTime      DateTime?
+  notes         String?
+  moodRating    Int?
+  wouldSeeAgain Boolean?
+  memoryTags    String[]
+  photoUrls     String[]
+  isPrivate     Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  match         Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([matchId, userId])
   @@index([matchId])
@@ -309,58 +277,47 @@ model DateJournal {
 }
 
 model RelationshipMode {
-  id              String    @id @default(uuid())
-  primaryUserId   String    @unique
-  primaryUser     User      @relation("PrimaryUser", fields: [primaryUserId], references: [id], onDelete: Cascade)
-  partnerUserId   String    @unique
-  partnerUser     User      @relation("PartnerUser", fields: [partnerUserId], references: [id], onDelete: Cascade)
-
-  isActive        Boolean   @default(true)
-  startedAt       DateTime  @default(now())
-
+  id              String             @id @default(uuid())
+  primaryUserId   String             @unique
+  partnerUserId   String             @unique
+  isActive        Boolean            @default(true)
+  startedAt       DateTime           @default(now())
   anniversaryDate DateTime?
   status          RelationshipStatus @default(ACTIVE)
-
-  discoveryPaused Boolean   @default(true)
-  profileVisible  Boolean   @default(false)
-
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  discoveryPaused Boolean            @default(true)
+  profileVisible  Boolean            @default(false)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  partnerUser     User               @relation("PartnerUser", fields: [partnerUserId], references: [id], onDelete: Cascade)
+  primaryUser     User               @relation("PrimaryUser", fields: [primaryUserId], references: [id], onDelete: Cascade)
 
   @@index([primaryUserId])
   @@index([partnerUserId])
 }
 
 model VerifiedReview {
-  id              String    @id @default(uuid())
-  reviewerId      String
-  reviewer        User      @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
-  reviewedId      String
-  reviewed        User      @relation("ReviewsReceived", fields: [reviewedId], references: [id], onDelete: Cascade)
-
-  matchId         String
-  match           Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
-
+  id                  String    @id @default(uuid())
+  reviewerId          String
+  reviewedId          String
+  matchId             String
   profileAccuracy     Int
   conversationQuality Int
   authenticity        Int
   punctuality         Int?
   chemistry           Int?
-
-  overallRating   Float
-
-  positives       String[]
-  improvements    String[]
-  additionalComments String?
-
-  isVerified      Boolean   @default(false)
-  verifiedAt      DateTime?
-
-  isFlagged       Boolean   @default(false)
-  flagReason      String?
-
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  overallRating       Float
+  positives           String[]
+  improvements        String[]
+  additionalComments  String?
+  isVerified          Boolean   @default(false)
+  verifiedAt          DateTime?
+  isFlagged           Boolean   @default(false)
+  flagReason          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  match               Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  reviewed            User      @relation("ReviewsReceived", fields: [reviewedId], references: [id], onDelete: Cascade)
+  reviewer            User      @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
 
   @@index([reviewedId])
   @@index([reviewerId])
@@ -371,40 +328,33 @@ model VerifiedReview {
 model MessageStatus {
   id              String    @id @default(uuid())
   messageId       String    @unique
-  message         Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
-
   isRead          Boolean   @default(false)
   readAt          DateTime?
-
   isTyping        Boolean   @default(false)
   typingStartedAt DateTime?
   typingEndedAt   DateTime?
-
   deliveredAt     DateTime?
-
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  message         Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([messageId])
 }
 
 model UserReport {
-  id              String    @id @default(uuid())
-  reporterId      String
-  reporter        User      @relation("ReportsMade", fields: [reporterId], references: [id], onDelete: Cascade)
-  reportedId      String
-  reported        User      @relation("ReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
-
-  reason          ReportReason
-  details         String?
-  matchId         String?
-
-  status          ReportStatus @default(PENDING)
-  reviewedAt      DateTime?
-  reviewedBy      String?
-
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id         String       @id @default(uuid())
+  reporterId String
+  reportedId String
+  reason     ReportReason
+  details    String?
+  matchId    String?
+  status     ReportStatus @default(PENDING)
+  reviewedAt DateTime?
+  reviewedBy String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  reported   User         @relation("ReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
+  reporter   User         @relation("ReportsMade", fields: [reporterId], references: [id], onDelete: Cascade)
 
   @@index([reportedId])
   @@index([reporterId])
@@ -494,4 +444,10 @@ enum ReportStatus {
   REVIEWED
   ACTIONED
   DISMISSED
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
 }

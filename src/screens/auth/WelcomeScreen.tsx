@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+import { registrationProgress } from '../../services/RegistrationProgressService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -21,6 +22,18 @@ type WelcomeScreenProps = {
 };
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
+  // Check for saved registration progress and redirect
+  useEffect(() => {
+    const checkProgress = async () => {
+      const resumeStep = await registrationProgress.getResumeStep();
+      if (resumeStep) {
+        // User has incomplete registration - redirect to where they left off
+        navigation.navigate(resumeStep.screen, { formData: resumeStep.formData });
+      }
+    };
+    checkProgress();
+  }, [navigation]);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -118,7 +131,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
           >
             <Text style={styles.signInButtonText}>Already have an account? Sign In</Text>
           </TouchableOpacity>
-          
+
           <Text style={styles.terms}>
             By continuing, you agree to our{' '}
             <Text style={styles.link}>Terms</Text> and{' '}

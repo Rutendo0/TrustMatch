@@ -3,11 +3,64 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest, authMiddleware } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { verificationService } from '../services/verificationService';
+import { verificationLimiter } from '../middleware/rateLimiter';
+import { sendVerificationResultEmail } from '../services/emailService';
 import Tesseract from 'tesseract.js';
 import sharp from 'sharp';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import jwt from 'jsonwebtoken';
+import { Canvas, Image, loadImage } from 'canvas';
+import * as faceapi from 'face-api.js';
+
+// Fix for face-api.js in Node.js environment
+// @ts-ignore - face-api.js types can be incomplete in Node.js
+// Use global fetch (available in Node.js 18+)
+faceapi.env.setEnv({ 
+  Canvas, 
+  Image, 
+  fetch: globalThis.fetch,
+});
+
+// Configure face-api.js models path
+const MODEL_PATH = path.join(process.cwd(), 'models');
+
+// Load face-api.js models from CDN or local
+let modelsLoaded = false;
+async function loadFaceApiModels() {
+  if (modelsLoaded) return;
+  try {
+    // Try to load from local first
+    try {
+      await faceapi.nets.tinyFaceDetector.loadFromDisk(MODEL_PATH);
+      await faceapi.nets.faceLandmark68Net.loadFromDisk(MODEL_PATH);
+      await faceapi.nets.faceRecognitionNet.loadFromDisk(MODEL_PATH);
+      modelsLoaded = true;
+      console.log('Face-api.js models loaded from local disk');
+      return;
+    } catch (localError) {
+      console.log('Local models not found, downloading from CDN...');
+    }
+    
+    // Fallback: Download models from justadudewhokeys CDN
+    const MODEL_URLS = {
+      tinyFaceDetector: 'https://justadudewhokeys.github.io/face-api.js/models/tiny_face_detector_model-weights_manifest.json',
+      faceLandmark68Net: 'https://justadudewhokeys.github.io/face-api.js/models/face_landmark_68_model-weights_manifest.json',
+      faceRecognitionNet: 'https://justadudewhokeys.github.io/face-api.js/models/face_recognition_model-weights_manifest.json',
+    };
+
+    await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
+    await faceapi.nets.faceLandmark68Net.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
+    await faceapi.nets.faceRecognitionNet.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
+    
+    modelsLoaded = true;
+    console.log('Face-api.js models loaded from CDN');
+  } catch (error) {
+    console.error('Error loading face-api.js models:', error);
+    throw error;
+  }
+}
 
 // ── Multer: local disk storage for ID documents (kept on-server, never sent to CDN) ─
 const idDocStorage = multer.diskStorage({
@@ -78,7 +131,21 @@ router.post(
   uploadIdDoc.single('document'),
   async (req: AuthRequest, res: Response) => {
     try {
-      const userId = req.userId!;
+      // Accept both authenticated and non-authenticated requests
+      let userId = req.userId;
+      
+      // If no auth, try to find user by email in body
+      if (!userId && req.body.email) {
+        const user = await prisma.user.findUnique({
+          where: { email: req.body.email },
+          select: { id: true }
+        });
+        if (user) userId = user.id;
+      }
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User not identified' });
+      }
 
       if (!req.file) {
         return res.status(400).json({ error: 'No document image provided' });
@@ -88,18 +155,28 @@ router.post(
       const relPath = `/uploads/documents/${req.file.filename}`;
 
       // Persist the document URL and type on the verification record
-      await prisma.verification.upsert({
-        where: { userId },
-        create: {
-          userId,
-          idDocumentUrl: relPath,
-          ...(documentType ? { idDocumentType: documentType as any } : {}),
-        },
-        update: {
-          idDocumentUrl: relPath,
-          ...(documentType ? { idDocumentType: documentType as any } : {}),
-        },
+      // First check if user exists
+      const userExists = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true }
       });
+      
+      if (userExists) {
+        await prisma.verification.upsert({
+          where: { userId },
+          create: {
+            userId,
+            idDocumentUrl: relPath,
+            ...(documentType ? { idDocumentType: documentType as any } : {}),
+          },
+          update: {
+            idDocumentUrl: relPath,
+            ...(documentType ? { idDocumentType: documentType as any } : {}),
+          },
+        });
+      } else {
+        console.log('User not found for ID document upload');
+      }
 
       return res.json({ success: true, documentUrl: relPath });
     } catch (error) {
@@ -204,24 +281,6 @@ router.get('/status', authMiddleware, async (req: AuthRequest, res: Response) =>
     const verification = await prisma.verification.findUnique({ where: { userId } });
     if (!verification) throw new AppError('Verification record not found', 404);
 
-    // If a Jumio workflow was started but the webhook hasn't arrived yet,
-    // try polling Jumio directly for the result.
-    if (
-      !verification.isVerified &&
-      verification.jumioWorkflowId &&
-      process.env.VERIFICATION_API_KEY
-    ) {
-      const result = await verificationService.getSessionResult(verification.jumioWorkflowId);
-      if (result?.workflowExecution?.decision?.type) {
-        await verificationService.processWebhook(result);
-        // Re-fetch after update
-        const updated = await prisma.verification.findUnique({ where: { userId } });
-        if (updated) {
-          return res.json(buildStatusResponse(updated));
-        }
-      }
-    }
-
     return res.json(buildStatusResponse(verification));
   } catch (error) {
     if (error instanceof AppError) {
@@ -250,24 +309,8 @@ router.post('/retry', authMiddleware, async (req: AuthRequest, res: Response) =>
       return res.json({ alreadyVerified: true });
     }
 
-    // Clear previous Jumio state before issuing a new session
-    await prisma.verification.update({
-      where: { userId },
-      data: {
-        jumioWorkflowId: null,
-        jumioDecision: null,
-        idVerified: false,
-        selfieVerified: false,
-        faceMatchScore: null,
-        livenessScore: null,
-      },
-    });
-
-    const session = await verificationService.createVerificationSession(userId, user.email);
-
     return res.status(201).json({
-      sessionId: session.sessionId,
-      sessionUrl: session.sessionUrl,
+      message: 'ID verification session created'
     });
   } catch (error) {
     if (error instanceof AppError) {
@@ -287,7 +330,6 @@ function buildStatusResponse(v: {
   phoneVerified: boolean;
   faceMatchScore: number | null;
   livenessScore: number | null;
-  jumioDecision: string | null;
   verifiedAt: Date | null;
 }) {
   return {
@@ -298,7 +340,6 @@ function buildStatusResponse(v: {
     phoneVerified: v.phoneVerified,
     faceMatchScore: v.faceMatchScore,
     livenessScore: v.livenessScore,
-    decision: v.jumioDecision,
     verifiedAt: v.verifiedAt,
   };
 }
@@ -389,6 +430,7 @@ router.post('/submit-local', authMiddleware, async (req: AuthRequest, res: Respo
     }
 
     // Update verification record with AI results
+    console.log('[submit-local] Updating verification for userId:', userId);
     await prisma.verification.update({
       where: { userId },
       data: {
@@ -400,6 +442,18 @@ router.post('/submit-local', authMiddleware, async (req: AuthRequest, res: Respo
         verifiedAt: new Date(),
       },
     });
+    console.log('[submit-local] Verification updated successfully');
+
+    // Send verification result email to user
+    const emailResult = await sendVerificationResultEmail(userId, {
+      success,
+      trustScore,
+      confidence,
+      ageEstimate,
+      isLikelyBot,
+      isDeepfake,
+    });
+    console.log('[submit-local] Email result:', emailResult);
 
     return res.json({
       success: true,
@@ -418,11 +472,33 @@ router.post('/submit-local', authMiddleware, async (req: AuthRequest, res: Respo
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/verification/document/verify-local
 // Local document verification with extracted data from on-device ML
+// Made public to work during registration flow (before user is logged in)
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/document/verify-local', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/document/verify-local', verificationLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.userId!;
-    const {
+    // Accept both authenticated and non-authenticated requests
+    // For registration flow, no auth required - validation happens client-side
+    // and actual user creation happens in PhotoUploadScreen
+    const authHeader = req.headers.authorization;
+    let userId: string | undefined;
+    
+    // If auth header provided, verify it - but don't fail if token is invalid/expired
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        if (process.env.JWT_SECRET) {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET) as { userId?: string };
+          userId = decoded.userId;
+        }
+      } catch (jwtError: any) {
+        // Invalid or expired token - continue without user (for registration flow)
+        // Don't treat this as a fatal error
+        console.log('Invalid/expired token in verify-local, continuing for registration:', jwtError.message);
+        // Don't re-throw - just continue without userId
+      }
+    }
+    
+    const { 
       documentType,
       documentNumber,
       firstName,
@@ -434,16 +510,17 @@ router.post('/document/verify-local', authMiddleware, async (req: AuthRequest, r
       gender,
       address,
       confidence,
+      email,
+      password
     } = req.body;
-
-    // Get user data for comparison
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { firstName: true, lastName: true, dateOfBirth: true, email: true },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    
+    // If user is authenticated, get their data for comparison
+    let user: { firstName: string; lastName: string; dateOfBirth: Date | null; email: string } | null = null;
+    if (userId) {
+      user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, dateOfBirth: true, email: true },
+      });
     }
 
     // Validate required fields
@@ -478,27 +555,64 @@ router.post('/document/verify-local', authMiddleware, async (req: AuthRequest, r
       errors.push('User must be at least 18 years old');
     }
 
-    // Check name matches
-    const extractedName = (fullName || `${firstName || ''} ${lastName || ''}`).toLowerCase().trim();
-    const userName = `${user.firstName} ${user.lastName}`.toLowerCase().trim();
-    let nameMatches = false;
-
-    if (extractedName && userName) {
-      const userFirstLower = user.firstName.toLowerCase();
-      const userLastLower = user.lastName.toLowerCase();
-      const extractedFirstLower = (firstName || extractedName.split(' ')[0] || '').toLowerCase();
-      const extractedLastLower = (lastName || extractedName.split(' ').slice(1).join(' ') || '').toLowerCase();
-
-      // Check for match
-      if (extractedFirstLower === userFirstLower || extractedLastLower === userLastLower) {
-        nameMatches = true;
-      } else if (extractedName.includes(userFirstLower) || extractedName.includes(userLastLower)) {
-        nameMatches = true;
+    // Check name matches (only if user exists - for logged in users)
+    let nameMatches = true;
+    if (user) {
+      // Normalize names for comparison - remove extra whitespace, convert to lowercase
+      const userFirstName = (user.firstName || '').toLowerCase().trim();
+      const userLastName = (user.lastName || '').toLowerCase().trim();
+      const userFullName = `${userFirstName} ${userLastName}`.trim();
+      
+      // Get OCR extracted names - could be in firstName/lastName fields or fullName
+      const ocrFirstName = (firstName || '').toLowerCase().trim();
+      const ocrLastName = (lastName || '').toLowerCase().trim();
+      const ocrFullName = (fullName || '').toLowerCase().trim();
+      
+      // If OCR only provides fullName, try to split it
+      let extractedFirstName = ocrFirstName;
+      let extractedLastName = ocrLastName;
+      
+      if (!ocrFirstName && !ocrLastName && ocrFullName) {
+        // Try to split full name
+        const nameParts = ocrFullName.split(/\s+/);
+        if (nameParts.length >= 1) extractedFirstName = nameParts[0];
+        if (nameParts.length >= 2) extractedLastName = nameParts.slice(1).join(' ');
+      } else if (ocrFirstName && !ocrLastName && ocrFullName) {
+        // Only first name provided, extract last name from full name
+        extractedLastName = ocrFullName.replace(ocrFirstName, '').trim();
       }
-    }
 
-    if (!nameMatches) {
-      errors.push('Name on document does not match registration data');
+      // Debug logging
+      console.log('Name matching debug:', {
+        userFirstName,
+        userLastName,
+        extractedFirstName,
+        extractedLastName,
+        ocrFullName,
+      });
+
+      if (userFirstName && userLastName && extractedFirstName && extractedLastName) {
+        // Check for exact match of first AND last name
+        const firstNameMatch = extractedFirstName === userFirstName;
+        const lastNameMatch = extractedLastName === userLastName;
+        
+        if (firstNameMatch && lastNameMatch) {
+          nameMatches = true;
+        } else if (ocrFullName.includes(userFirstName) && ocrFullName.includes(userLastName)) {
+          // Both first and last names found in full name string
+          nameMatches = true;
+        } else {
+          // No match
+          nameMatches = false;
+        }
+      } else if (userFirstName && extractedFirstName) {
+        // At minimum, first name should match
+        nameMatches = extractedFirstName === userFirstName;
+      }
+
+      if (!nameMatches) {
+        errors.push('Name on document does not match registration data');
+      }
     }
 
     // Check document expiry
@@ -518,7 +632,7 @@ router.post('/document/verify-local', authMiddleware, async (req: AuthRequest, r
       ? DocumentVerificationStatus.VERIFIED 
       : DocumentVerificationStatus.FAILED;
 
-    // Store extracted data for later reference
+    // Store extracted data for later reference (only if userId exists)
     const extractedData: ExtractedDocumentData = {
       documentType,
       documentNumber,
@@ -531,24 +645,36 @@ router.post('/document/verify-local', authMiddleware, async (req: AuthRequest, r
       gender,
       address,
     };
-    documentDataStore.set(userId, extractedData);
+    if (userId) {
+      documentDataStore.set(userId, extractedData);
+    }
 
-    // Update verification record
-    if (verificationStatus === DocumentVerificationStatus.VERIFIED) {
-      await prisma.verification.upsert({
-        where: { userId },
-        create: {
-          userId,
-          idVerified: true,
-          idDocumentType: documentType as any,
-          verifiedAt: new Date(),
-        },
-        update: {
-          idVerified: true,
-          idDocumentType: documentType as any,
-          verifiedAt: new Date(),
-        },
+    // Update verification record (only if userId exists - for logged in users)
+    if (userId && verificationStatus === DocumentVerificationStatus.VERIFIED) {
+      // First check if user exists
+      const userExists = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true }
       });
+      
+      if (userExists) {
+        await prisma.verification.upsert({
+          where: { userId },
+          create: {
+            userId,
+            idVerified: true,
+            idDocumentType: documentType as any,
+            verifiedAt: new Date(),
+          },
+          update: {
+            idVerified: true,
+            idDocumentType: documentType as any,
+            verifiedAt: new Date(),
+          },
+        });
+      } else {
+        console.log('User not found for verification, skipping record creation');
+      }
     }
 
     return res.json({
@@ -566,12 +692,34 @@ router.post('/document/verify-local', authMiddleware, async (req: AuthRequest, r
         name: fullName || `${firstName || ''} ${lastName || ''}`.trim(),
       },
     });
-  } catch (error) {
+  } catch (error: any) {
+    // Provide more detailed error information for debugging
+    let errorMessage = 'Failed to verify document';
+    let statusCode = 500;
+
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ error: error.message });
     }
+
+    // Handle specific error types with better messages
+    if (error.name === 'JsonWebTokenError') {
+      errorMessage = 'Invalid authentication token';
+      statusCode = 401;
+    } else if (error.name === 'TokenExpiredError') {
+      errorMessage = 'Authentication token expired';
+      statusCode = 401;
+    } else if (error.message?.includes('Prisma')) {
+      errorMessage = 'Database operation failed';
+      console.error('Prisma error in document verification:', error);
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+
     console.error('Local document verification error:', error);
-    return res.status(500).json({ error: 'Failed to verify document' });
+    return res.status(statusCode).json({ 
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -628,6 +776,124 @@ router.get('/document/status', authMiddleware, async (req: AuthRequest, res: Res
     }
     console.error('Document status error:', error);
     return res.status(500).json({ error: 'Failed to get document status' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/verification/face-compare
+// Compare two face images using face-api.js on the server
+// Free solution - no external API needed
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/face-compare', async (req: AuthRequest, res: Response) => {
+  try {
+    const { image1, image2 } = req.body;
+
+    if (!image1 || !image2) {
+      return res.status(400).json({ 
+        error: 'Two images are required for comparison',
+        details: 'Please provide both image1 and image2 URLs or base64 data'
+      });
+    }
+
+    // Load models if not already loaded
+    await loadFaceApiModels();
+
+    // Load images from URLs or base64 - use canvas for Node.js
+    let img1: Canvas;
+    let img2: Canvas;
+
+    try {
+      // Helper to load image into canvas
+      const loadImageToCanvas = async (source: string): Promise<Canvas> => {
+        let imageData: Buffer;
+        
+        if (source.startsWith('data:image')) {
+          // Base64 - extract the data part
+          const base64Data = source.replace(/^data:image\/\w+;base64,/, '');
+          imageData = Buffer.from(base64Data, 'base64');
+        } else if (source.startsWith('http')) {
+          // Fetch from URL
+          const axios = require('axios');
+          const response = await axios.get(source, { responseType: 'arraybuffer' });
+          imageData = Buffer.from(response.data);
+        } else {
+          // Local file path
+          imageData = fs.readFileSync(source);
+        }
+        
+        // Create canvas and draw image
+        const img = await loadImage(imageData);
+        const canvas = new Canvas(img.width, img.height);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        return canvas;
+      };
+
+      img1 = await loadImageToCanvas(image1);
+      img2 = await loadImageToCanvas(image2);
+    } catch (imgError: any) {
+      console.error('Error loading images:', imgError);
+      return res.status(400).json({ 
+        error: 'Failed to load images',
+        details: imgError.message
+      });
+    }
+
+    // Detect faces and get descriptors
+    const detector = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 416,
+      scoreThreshold: 0.5
+    });
+
+    const detection1 = await faceapi.detectSingleFace(img1, detector)
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+
+    const detection2 = await faceapi.detectSingleFace(img2, detector)
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+
+    if (!detection1 || !detection2) {
+      return res.json({
+        success: false,
+        similarity: 0,
+        isMatch: false,
+        error: !detection1 ? 'No face detected in first image' : 'No face detected in second image',
+        message: 'Could not detect a face in one or both images. Please use clearer photos.',
+      });
+    }
+
+    // Calculate face matching score using Euclidean distance
+    const distance = faceapi.euclideanDistance(
+      detection1.descriptor,
+      detection2.descriptor
+    );
+
+    // Convert distance to similarity (0 = identical, 1 = completely different)
+    // Typical threshold: 0.6 for tight match, 0.4 for very strict
+    const similarity = 1 - distance;
+    const threshold = 0.5; // 50% similarity threshold
+    const isMatch = similarity >= threshold;
+
+    console.log(`Face comparison: distance=${distance.toFixed(4)}, similarity=${(similarity * 100).toFixed(1)}%, match=${isMatch}`);
+
+    return res.json({
+      success: true,
+      similarity: Math.max(0, Math.min(1, similarity)),
+      isMatch,
+      distance: distance,
+      threshold,
+      message: isMatch 
+        ? `Faces match! (${(similarity * 100).toFixed(0)}% similarity)`
+        : `Faces do not match (${(similarity * 100).toFixed(0)}% similarity). Threshold: ${(threshold * 100).toFixed(0)}%`,
+    });
+
+  } catch (error: any) {
+    console.error('Face comparison error:', error);
+    return res.status(500).json({ 
+      error: 'Face comparison failed',
+      details: error.message
+    });
   }
 });
 

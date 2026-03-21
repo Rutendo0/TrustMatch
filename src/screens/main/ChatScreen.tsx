@@ -17,6 +17,7 @@ import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { api } from '../../services/api';
 import { useResponsive, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 
 type ChatScreenProps = {
@@ -83,7 +84,8 @@ const MOCK_MESSAGES: Message[] = [
 
 export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => {
   const { matchId, name } = route.params as { matchId: string; name: string };
-  const [messages, setMessages] = useState(MOCK_MESSAGES);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -93,6 +95,55 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
   const soundRef = useRef<Audio.Sound | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isSmall, isTablet, height } = useResponsive();
+
+  useEffect(() => {
+    fetchMessages();
+  }, [matchId]);
+
+  const fetchMessages = async () => {
+    try {
+      const data = await api.getMessages(matchId);
+      // Map API response to Message interface
+      const mappedMessages: Message[] = data.map((m: any) => ({
+        id: m.id,
+        text: m.content,
+        senderId: m.senderId,
+        timestamp: new Date(m.createdAt),
+        status: m.readAt ? 'read' : 'delivered',
+        type: m.type || 'text',
+        audio: m.audioUrl,
+        audioDuration: m.duration,
+      }));
+      setMessages(mappedMessages);
+      // Mark messages as read
+      await api.markMessagesAsRead(matchId);
+    } catch (error) {
+      console.error('Failed to fetch messages:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!inputText.trim()) return;
+    
+    try {
+      await api.sendMessage(matchId, inputText, 'TEXT');
+      // Add message to local state
+      const newMessage: Message = {
+        id: Date.now().toString(),
+        text: inputText,
+        senderId: 'me',
+        timestamp: new Date(),
+        status: 'sent',
+        type: 'text',
+      };
+      setMessages(prev => [...prev, newMessage]);
+      setInputText('');
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    }
+  };
 
   const keyboardVerticalOffset = Platform.select({
     ios: isSmall ? 60 : isTablet ? 80 : 70,
@@ -237,25 +288,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
     };
   }, []);
 
-  const sendMessage = () => {
-    if (!inputText.trim()) return;
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text: inputText.trim(),
-      senderId: CURRENT_USER_ID,
-      timestamp: new Date(),
-      status: 'sent',
-      type: 'text',
-    };
-
-    setMessages((prev) => [...prev, newMessage]);
-    setInputText('');
-
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  };
 
   const startVideoCall = () => {
     navigation.navigate('VideoCall', {
@@ -274,10 +307,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
 
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     const isMe = item.senderId === CURRENT_USER_ID;
+    const prevMessage = messages[index - 1];
     const showTimestamp =
-      index === 0 ||
-      messages[index - 1].senderId !== item.senderId ||
-      item.timestamp.getTime() - messages[index - 1].timestamp.getTime() > 300000;
+      !prevMessage ||
+      prevMessage.senderId !== item.senderId ||
+      item.timestamp.getTime() - prevMessage.timestamp.getTime() > 300000;
 
     return (
       <View style={styles.messageContainer}>

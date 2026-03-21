@@ -41,6 +41,7 @@ if (missingEnvVars.length > 0) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0'; // Bind to all interfaces by default
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Create HTTP server for WebSocket support
@@ -152,8 +153,8 @@ initializeSocket(httpServer);
 logger.info('WebSocket server initialized');
 
 // ── Start server ─────────────────────────────────────────────────────────────
-httpServer.listen(PORT, () => {
-  logger.info(`🚀 TrustMatch server running on port ${PORT} [${NODE_ENV}]`);
+httpServer.listen(PORT, HOST as any, () => {
+  logger.info(`🚀 TrustMatch server running on http://${HOST}:${PORT} [${NODE_ENV}]`);
   logger.info(`📝 Logs directory: ${path.join(process.cwd(), 'logs')}`);
 });
 

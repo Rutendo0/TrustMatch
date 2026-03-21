@@ -99,6 +99,111 @@ router.post(
   }
 );
 
+// GET /api/matches/likes - Get people who liked the current user
+router.get('/likes', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { limit = 20 } = req.query;
+
+    // Find all users who have swiped LIKE on current user
+    // but current user hasn't swiped on them yet
+    const likedMe = await prisma.swipe.findMany({
+      where: {
+        swipedId: userId,
+        action: { in: ['LIKE', 'SUPERLIKE'] },
+      },
+      include: {
+        swiper: {
+          include: {
+            photos: { orderBy: { order: 'asc' } },
+            verification: { select: { isVerified: true } },
+          },
+        },
+      },
+      take: Number(limit),
+    });
+
+    // Get current user's swipes to filter out
+    const mySwipes = await prisma.swipe.findMany({
+      where: { swiperId: userId },
+      select: { swipedId: true },
+    });
+    const mySwipedIds = new Set(mySwipes.map(s => s.swipedId));
+
+    // Filter to only show users who liked me and I haven't swiped yet
+    const mutualLikes = likedMe.filter(swipe => !mySwipedIds.has(swipe.swiperId));
+
+    const response = mutualLikes.map((swipe) => ({
+      id: swipe.swiper.id,
+      firstName: swipe.swiper.firstName,
+      age: calculateAge(swipe.swiper.dateOfBirth),
+      bio: swipe.swiper.bio,
+      photos: swipe.swiper.photos.map(p => p.url),
+      isVerified: swipe.swiper.verification?.isVerified || false,
+      likedAt: swipe.createdAt,
+    }));
+
+    res.json(response);
+  } catch (error) {
+    console.error('Get likes error:', error);
+    res.status(500).json({ error: 'Failed to get likes' });
+  }
+});
+
+// GET /api/matches/sent-likes - Get people the current user has liked
+router.get('/sent-likes', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { limit = 20 } = req.query;
+
+    // Find all users that current user has swiped LIKE on
+    const sentLikes = await prisma.swipe.findMany({
+      where: {
+        swiperId: userId,
+        action: { in: ['LIKE', 'SUPERLIKE'] },
+      },
+      include: {
+        swiped: {
+          include: {
+            photos: { orderBy: { order: 'asc' } },
+            verification: { select: { isVerified: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Number(limit),
+    });
+
+    const response = sentLikes.map((swipe) => ({
+      id: swipe.swiped.id,
+      firstName: swipe.swiped.firstName,
+      age: calculateAge(swipe.swiped.dateOfBirth),
+      bio: swipe.swiped.bio,
+      photos: swipe.swiped.photos.map(p => p.url),
+      isVerified: swipe.swiped.verification?.isVerified || false,
+      likedAt: swipe.createdAt,
+    }));
+
+    res.json(response);
+  } catch (error) {
+    console.error('Get sent likes error:', error);
+    res.status(500).json({ error: 'Failed to get sent likes' });
+  }
+});
+
+// Helper function to calculate age
+function calculateAge(dateOfBirth: Date | string | null): number {
+  if (!dateOfBirth) return 25;
+  const today = new Date();
+  const birthDate = new Date(dateOfBirth);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}
+
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;

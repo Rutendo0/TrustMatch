@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -10,8 +11,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VerifiedBadge } from '../../components/common';
+import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
-import { useResponsive, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
+import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 interface Profile {
@@ -108,6 +110,25 @@ type HomeScreenProps = {
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const { width, height, wp, hp, normalize, isLandscape, isTablet } = useResponsive();
   
+  // Set up header with filter button
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: true,
+      headerTitle: 'Discover',
+      headerTitleAlign: 'center',
+      headerStyle: { backgroundColor: COLORS.background },
+      headerTintColor: COLORS.text,
+      headerRight: () => (
+        <TouchableOpacity 
+          onPress={() => navigation.navigate('Filters')}
+          hitSlop={HIT_SLOP}
+        >
+          <Ionicons name="options-outline" size={normalize(24)} color={COLORS.text} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, normalize]);
+  
   const cardDimensions = useMemo(() => {
     const cardHeight = isLandscape ? hp(75) : hp(60);
     const cardWidth = isLandscape 
@@ -140,17 +161,119 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   const actionButtonSize = useMemo(() => Math.max(MIN_TOUCH_SIZE, normalize(60)), [normalize]);
 
-  const [profiles, setProfiles] = useState(MOCK_PROFILES);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [likedProfiles, setLikedProfiles] = useState<string[]>([]);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const currentProfile = profiles[currentIndex];
+  useEffect(() => {
+    fetchProfiles();
+  }, []);
 
-  const handleLike = () => {
+  // Refresh profiles when screen comes into focus (e.g., after returning from filters)
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchProfiles();
+    }, [])
+  );
+
+  const fetchProfiles = async () => {
+    try {
+      // Get user profile to access preferences
+      let filters;
+      try {
+        const userProfile = await api.getProfile();
+        filters = {
+          gender: userProfile?.preferences?.showMe,
+          ageMin: userProfile?.preferences?.ageRange?.min,
+          ageMax: userProfile?.preferences?.ageRange?.max,
+          distance: userProfile?.preferences?.distance,
+        };
+      } catch (profileError) {
+        console.warn('Could not fetch user preferences:', profileError);
+      }
+      const data = await api.getDiscoverProfiles(10, filters);
+      // Map API response to Profile interface
+      const mappedProfiles: Profile[] = (data || []).map((p: any) => ({
+        id: p?.id || Math.random().toString(),
+        name: p?.firstName || p?.name || 'User',
+        age: p?.age || 25,
+        bio: p?.bio || 'No bio available',
+        distance: p?.city ? `${p.city}` : 'Unknown distance',
+        photos: p?.photos?.length > 0 ? p.photos : ['https://via.placeholder.com/400'],
+        isVerified: p?.isVerified || false,
+        trustScore: p?.trustScore || 85,
+        compatibility: Math.floor(Math.random() * 30) + 70, // Random 70-100
+        personalityType: 'N/A',
+        interests: p?.interests || [],
+        safetyFeatures: p?.isVerified ? ['Verified'] : [],
+        verificationBadges: p?.isVerified ? ['Identity', 'Selfie'] : [],
+      }));
+      setProfiles(mappedProfiles);
+    } catch (error) {
+      console.error('Failed to fetch profiles:', error);
+      // Set empty profiles on error - user will see no profiles available
+      setProfiles([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const currentProfile = (profiles && profiles.length > 0) ? profiles[currentIndex] : null;
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading profiles...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!currentProfile) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>No more profiles nearby</Text>
+          <Text style={styles.subText}>Check back later for new matches</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const handleLike = async () => {
     if (currentProfile) {
       setLikedProfiles(prev => [...prev, currentProfile.id]);
-      // Profile liked successfully
+      try {
+        await api.swipe(currentProfile.id, 'LIKE');
+        console.log('Swipe sent: LIKE');
+      } catch (error) {
+        console.error('Failed to swipe:', error);
+      }
+    }
+  };
+
+  const handleDislike = async () => {
+    if (currentProfile) {
+      try {
+        await api.swipe(currentProfile.id, 'DISLIKE');
+        console.log('Swipe sent: DISLIKE');
+      } catch (error) {
+        console.error('Failed to swipe:', error);
+      }
+    }
+  };
+
+  const handleSuperLike = async () => {
+    if (currentProfile) {
+      try {
+        await api.swipe(currentProfile.id, 'SUPERLIKE');
+        console.log('Swipe sent: SUPERLIKE');
+      } catch (error) {
+        console.error('Failed to swipe:', error);
+      }
     }
   };
 
@@ -448,6 +571,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    fontSize: normalize(FONTS.sizes.lg),
+    color: COLORS.text,
+    marginBottom: normalize(SPACING.sm),
+  },
+  subText: {
+    fontSize: normalize(FONTS.sizes.md),
+    color: COLORS.textSecondary,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
