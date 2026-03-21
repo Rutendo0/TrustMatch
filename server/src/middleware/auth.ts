@@ -5,6 +5,12 @@ import { prisma } from '../lib/prisma';
 export interface AuthRequest extends Request {
   userId?: string;
   isVerified?: boolean;
+  body: any;
+  params: any;
+  query: any;
+  headers: any;
+  file?: any;
+  files?: any;
 }
 
 export const authMiddleware = async (
