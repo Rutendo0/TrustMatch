@@ -5,7 +5,7 @@ import { registrationProgress } from './RegistrationProgressService';
 
 // Use environment variable or default to localhost for development
 // For production, set EXPO_PUBLIC_API_URL in your environment
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.93:3000/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://trustmatch-server.onrender.com/api';
 
 class ApiService {
   private client: AxiosInstance;

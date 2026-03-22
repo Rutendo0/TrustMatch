@@ -127,6 +127,11 @@ app.get('/api/version', (_req, res) => {
 });
 
 // ── Public routes ─────────────────────────────────────────────────────────────
+// Health check route
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/verification', verificationRoutes);
 
