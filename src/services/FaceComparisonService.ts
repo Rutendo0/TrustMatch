@@ -53,21 +53,33 @@ export const serverFaceCompare = async (
   image2: string
 ): Promise<ServerFaceCompareResult> => {
   try {
-    console.log('Calling server face comparison endpoint...');
+    console.log('Calling external face comparison API...');
     
     const response = await api.compareFaces(image1, image2);
     
-    console.log('Server face compare response:', response);
+    console.log('Face comparison response:', response);
+    
+    if (!response.success) {
+      return {
+        success: false,
+        similarity: 0,
+        isMatch: false,
+        threshold: 0.5,
+        message: response.message || 'Face comparison failed',
+        error: response.message,
+      };
+    }
+    
     return response;
   } catch (error: any) {
-    console.error('Server face comparison error:', error);
+    console.error('Face comparison error:', error);
     return {
       success: false,
       similarity: 0,
       isMatch: false,
       threshold: 0.5,
-      message: error.response?.data?.error || error.message || 'Face comparison failed',
-      error: error.response?.data?.details || error.message,
+      message: error.message || 'Face comparison failed',
+      error: error.message,
     };
   }
 };

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -109,8 +109,10 @@ type HomeScreenProps = {
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const { width, height, wp, hp, normalize, isLandscape, isTablet } = useResponsive();
+
+  // ALL HOOKS AT TOP - NO EARLY RETURNS BEFORE THIS POINT
   
-  // Set up header with filter button
+  // Header setup
   useLayoutEffect(() => {
     navigation.setOptions({
       headerShown: true,
@@ -119,12 +121,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       headerStyle: { backgroundColor: COLORS.background },
       headerTintColor: COLORS.text,
       headerRight: () => (
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('Filters')}
-          hitSlop={HIT_SLOP}
-        >
-          <Ionicons name="options-outline" size={normalize(24)} color={COLORS.text} />
-        </TouchableOpacity>
+        <View style={{ marginRight: 16 }}>
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('Filters')}
+            hitSlop={HIT_SLOP}
+          >
+            <Ionicons name="options-outline" size={normalize(24)} color={COLORS.text} />
+          </TouchableOpacity>
+        </View>
       ),
     });
   }, [navigation, normalize]);
@@ -161,153 +165,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   const actionButtonSize = useMemo(() => Math.max(MIN_TOUCH_SIZE, normalize(60)), [normalize]);
 
+  // All state hooks
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [likedProfiles, setLikedProfiles] = useState<string[]>([]);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // Effects
   useEffect(() => {
     fetchProfiles();
   }, []);
 
-  // Refresh profiles when screen comes into focus (e.g., after returning from filters)
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       fetchProfiles();
     }, [])
   );
 
-  const fetchProfiles = async () => {
-    try {
-      // Get user profile to access preferences
-      let filters;
-      try {
-        const userProfile = await api.getProfile();
-        filters = {
-          gender: userProfile?.preferences?.showMe,
-          ageMin: userProfile?.preferences?.ageRange?.min,
-          ageMax: userProfile?.preferences?.ageRange?.max,
-          distance: userProfile?.preferences?.distance,
-        };
-      } catch (profileError) {
-        console.warn('Could not fetch user preferences:', profileError);
-      }
-      const data = await api.getDiscoverProfiles(10, filters);
-      // Map API response to Profile interface
-      const mappedProfiles: Profile[] = (data || []).map((p: any) => ({
-        id: p?.id || Math.random().toString(),
-        name: p?.firstName || p?.name || 'User',
-        age: p?.age || 25,
-        bio: p?.bio || 'No bio available',
-        distance: p?.city ? `${p.city}` : 'Unknown distance',
-        photos: p?.photos?.length > 0 ? p.photos : ['https://via.placeholder.com/400'],
-        isVerified: p?.isVerified || false,
-        trustScore: p?.trustScore || 85,
-        compatibility: Math.floor(Math.random() * 30) + 70, // Random 70-100
-        personalityType: 'N/A',
-        interests: p?.interests || [],
-        safetyFeatures: p?.isVerified ? ['Verified'] : [],
-        verificationBadges: p?.isVerified ? ['Identity', 'Selfie'] : [],
-      }));
-      setProfiles(mappedProfiles);
-    } catch (error) {
-      console.error('Failed to fetch profiles:', error);
-      // Set empty profiles on error - user will see no profiles available
-      setProfiles([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const currentProfile = (profiles && profiles.length > 0) ? profiles[currentIndex] : null;
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading profiles...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (!currentProfile) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>No more profiles nearby</Text>
-          <Text style={styles.subText}>Check back later for new matches</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const handleLike = async () => {
-    if (currentProfile) {
-      setLikedProfiles(prev => [...prev, currentProfile.id]);
-      try {
-        await api.swipe(currentProfile.id, 'LIKE');
-        console.log('Swipe sent: LIKE');
-      } catch (error) {
-        console.error('Failed to swipe:', error);
-      }
-    }
-  };
-
-  const handleDislike = async () => {
-    if (currentProfile) {
-      try {
-        await api.swipe(currentProfile.id, 'DISLIKE');
-        console.log('Swipe sent: DISLIKE');
-      } catch (error) {
-        console.error('Failed to swipe:', error);
-      }
-    }
-  };
-
-  const handleSuperLike = async () => {
-    if (currentProfile) {
-      try {
-        await api.swipe(currentProfile.id, 'SUPERLIKE');
-        console.log('Swipe sent: SUPERLIKE');
-      } catch (error) {
-        console.error('Failed to swipe:', error);
-      }
-    }
-  };
-
-  const goToNext = () => {
-    if (currentIndex < profiles.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-      setCurrentPhotoIndex(0);
-    }
-  };
-
-  const goToPrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1);
-      setCurrentPhotoIndex(0);
-    }
-  };
-
-  const viewFullProfile = () => {
-    if (currentProfile) {
-      navigation.navigate('ProfileDetail', { profile: currentProfile });
-    }
-  };
-
-  const nextPhoto = () => {
-    if (currentProfile && currentPhotoIndex < currentProfile.photos.length - 1) {
-      setCurrentPhotoIndex(prev => prev + 1);
-    }
-  };
-
-  const previousPhoto = () => {
-    if (currentPhotoIndex > 0) {
-      setCurrentPhotoIndex(prev => prev - 1);
-    }
-  };
+  // Memoized values & callbacks
+  const currentProfile = useMemo(
+    () => (profiles.length > 0 ? profiles[currentIndex] : null),
+    [profiles, currentIndex]
+  );
 
   const dynamicStyles = useMemo(() => StyleSheet.create({
     card: {
@@ -374,20 +254,134 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     },
   }), [cardWidth, cardHeight, responsiveFonts]);
 
-  if (currentIndex >= profiles.length) {
+  const fetchProfiles = useCallback(async () => {
+    setLoading(true);
+    try {
+      let filters = {};
+      try {
+        const userProfile = await api.getProfile();
+        filters = {
+          gender: userProfile?.preferences?.showMe,
+          ageMin: userProfile?.preferences?.ageRange?.min,
+          ageMax: userProfile?.preferences?.ageRange?.max,
+          distance: userProfile?.preferences?.distance,
+        };
+      } catch (profileError) {
+        console.warn('Could not fetch user preferences:', profileError);
+      }
+      
+      const data = await api.getDiscoverProfiles(10, filters);
+      const mappedProfiles: Profile[] = (data || []).map((p: any) => ({
+        id: p?.id || Math.random().toString(),
+        name: p?.firstName || p?.name || 'User',
+        age: p?.age || 25,
+        bio: p?.bio || 'No bio available',
+        distance: p?.city ? `${p.city}` : 'Unknown distance',
+        photos: p?.photos?.length > 0 ? p.photos : ['https://via.placeholder.com/400'],
+        isVerified: p?.isVerified || false,
+        trustScore: p?.trustScore || 85,
+        compatibility: Math.floor(Math.random() * 30) + 70,
+        personalityType: 'N/A',
+        interests: p?.interests || [],
+        safetyFeatures: p?.isVerified ? ['Verified'] : [],
+        verificationBadges: p?.isVerified ? ['Identity', 'Selfie'] : [],
+      }));
+      setProfiles(mappedProfiles);
+    } catch (error) {
+      console.error('Failed to fetch profiles:', error);
+      setProfiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleLike = useCallback(async () => {
+    if (currentProfile!) {
+      setLikedProfiles(prev => [...prev, currentProfile!.id]);
+      try {
+        await api.swipe(currentProfile!.id, 'LIKE');
+      } catch (error) {
+        console.error('Failed to swipe:', error);
+      }
+    }
+  }, [currentProfile]);
+
+  const handleDislike = useCallback(async () => {
+    if (currentProfile!) {
+      try {
+        await api.swipe(currentProfile!.id, 'DISLIKE');
+      } catch (error) {
+        console.error('Failed to swipe:', error);
+      }
+    }
+  }, [currentProfile]);
+
+  const handleSuperLike = useCallback(async () => {
+    if (currentProfile!) {
+      try {
+        await api.swipe(currentProfile!.id, 'SUPERLIKE');
+      } catch (error) {
+        console.error('Failed to swipe:', error);
+      }
+    }
+  }, [currentProfile]);
+
+  const goToNext = useCallback(() => {
+    if (currentIndex < profiles.length - 1) {
+      setCurrentIndex(prev => prev + 1);
+      setCurrentPhotoIndex(0);
+    }
+  }, [currentIndex, profiles.length]);
+
+  const goToPrevious = useCallback(() => {
+    if (currentIndex > 0) {
+      setCurrentIndex(prev => prev - 1);
+      setCurrentPhotoIndex(0);
+    }
+  }, [currentIndex]);
+
+  const viewFullProfile = useCallback(() => {
+    if (currentProfile) {
+      navigation.navigate('ProfileDetail', { profile: currentProfile });
+    }
+  }, [currentProfile, navigation]);
+
+  const nextPhoto = useCallback(() => {
+    if (currentProfile! && currentPhotoIndex < currentProfile!.photos.length - 1) {
+      setCurrentPhotoIndex(prev => prev + 1);
+    }
+  }, [currentPhotoIndex, currentProfile]);
+
+  const previousPhoto = useCallback(() => {
+    if (currentPhotoIndex > 0) {
+      setCurrentPhotoIndex(prev => prev - 1);
+    }
+  }, [currentPhotoIndex]);
+
+  // NOW EARLY RETURNS ARE SAFE - ALL HOOKS HAVE RUN
+
+  if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-        <View style={styles.emptyState}>
-          <Ionicons name="heart-dislike" size={responsiveIconSizes.emptyState} color={COLORS.textLight} />
-          <Text style={dynamicStyles.emptyTitle}>No More Profiles</Text>
-          <Text style={dynamicStyles.emptySubtitle}>
-            Check back later for new matches in your area
-          </Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading profiles...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  if (profiles.length === 0 || currentIndex >= profiles.length) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>No more profiles nearby</Text>
+          <Text style={styles.subText}>Check back later for new matches</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // MAIN RENDER
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
@@ -420,7 +414,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       </View>
 
       <View style={styles.contentContainer}>
-        {/* Profile Card */}
         <TouchableOpacity 
           style={[dynamicStyles.card, styles.profileCard]} 
           onPress={viewFullProfile}
@@ -436,7 +429,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             style={styles.cardGradient}
           />
 
-          {/* Photo Navigation Indicators */}
           {currentProfile.photos.length > 1 && (
             <View style={styles.photoIndicators}>
               {currentProfile.photos.map((_, index) => (
@@ -451,7 +443,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             </View>
           )}
 
-          {/* Photo Navigation Arrows */}
           {currentProfile.photos.length > 1 && (
             <>
               {currentPhotoIndex > 0 && (
@@ -520,9 +511,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Navigation and Action Buttons */}
       <View style={styles.actionContainer}>
-        {/* Previous Button */}
         <TouchableOpacity
           style={[styles.navButton, styles.previousButton]}
           onPress={goToPrevious}
@@ -536,7 +525,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           />
         </TouchableOpacity>
 
-        {/* Like Button */}
         <TouchableOpacity
           style={[styles.likeButton]}
           onPress={handleLike}
@@ -545,7 +533,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           <Ionicons name="heart" size={responsiveIconSizes.actionLarge} color={COLORS.white} />
         </TouchableOpacity>
 
-        {/* Next Button */}
         <TouchableOpacity
           style={[styles.navButton, styles.nextButton]}
           onPress={goToNext}
@@ -560,7 +547,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Profile Counter */}
       <View style={styles.counterContainer}>
         <Text style={styles.counterText}>
           {currentIndex + 1} of {profiles.length}
@@ -751,6 +737,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
   },
+  profilePicContainer: {
+    position: 'relative',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   actionContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -792,25 +792,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     fontWeight: '500',
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: SPACING.xl,
-  },
-  profilePicContainer: {
-    position: 'relative',
-  },
-  verifiedBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

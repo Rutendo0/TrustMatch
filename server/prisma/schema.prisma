@@ -85,24 +85,45 @@ model UserBlock {
 }
 
 model Verification {
-  id              String          @id @default(uuid())
-  userId          String          @unique
-  isVerified      Boolean         @default(false)
-  idVerified      Boolean         @default(false)
-  selfieVerified  Boolean         @default(false)
-  emailVerified   Boolean         @default(false)
-  phoneVerified   Boolean         @default(false)
-  idDocumentType  IDDocumentType?
-  idDocumentUrl   String?
-  selfieUrl       String?
-  faceMatchScore  Float?
-  livenessScore   Float?
-  verifiedAt      DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  emailCode       String?
-  emailCodeExpiry DateTime?
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                  String              @id @default(uuid())
+  userId              String              @unique
+  isVerified          Boolean             @default(false)
+  idVerified          Boolean             @default(false)
+  selfieVerified      Boolean             @default(false)
+  emailVerified       Boolean             @default(false)
+  phoneVerified       Boolean             @default(false)
+  liveVerified        Boolean             @default(false)
+  lastLiveVerification DateTime?
+  liveVerificationCount Int               @default(0)
+  idDocumentType      IDDocumentType?
+  idDocumentUrl       String?
+  selfieUrl           String?
+  faceMatchScore      Float?
+  livenessScore       Float?
+  verifiedAt          DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  emailCode           String?
+  emailCodeExpiry     DateTime?
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  liveVerificationHistory LiveVerification[]
+}
+
+model LiveVerification {
+  id              String      @id @default(uuid())
+  verificationId  String
+  similarity      Float
+  confidence      Float
+  isMatch         Boolean
+  photosMatched   Int
+  totalPhotos     Int
+  ipAddress       String?
+  deviceInfo      String?
+  createdAt       DateTime    @default(now())
+  verification    Verification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@index([verificationId])
+  @@index([createdAt])
 }
 
 model DeviceFingerprint {

@@ -79,6 +79,7 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
         gender: userGender || 'MALE',
         interestedIn: userGender === 'MALE' ? 'FEMALE' : 'MALE',
         deviceFingerprint: deviceFingerprint.fingerprint || 'unknown',
+        identityFingerprint: formData?.identityFingerprint,
         platform: 'mobile',
       });
 

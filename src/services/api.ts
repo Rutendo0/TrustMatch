@@ -6,6 +6,8 @@ import { registrationProgress } from './RegistrationProgressService';
 // Use environment variable or default to localhost for development
 // For production, set EXPO_PUBLIC_API_URL in your environment
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://trustmatch-server.onrender.com/api';
+// For external face verification API, set EXPO_PUBLIC_FACE_VERIFICATION_API_URL
+// If not set, face verification will return an error
 
 class ApiService {
   private client: AxiosInstance;
@@ -77,6 +79,7 @@ class ApiService {
     gender: string;
     interestedIn: string;
     deviceFingerprint: string;
+    identityFingerprint?: string;
     platform: string;
   }) {
     const response = await this.client.post('/auth/register', data);
@@ -123,6 +126,11 @@ class ApiService {
     const response = await this.client.post('/users/photos', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
+    return response.data;
+  }
+
+  async deletePhoto(photoId: string) {
+    const response = await this.client.delete(`/users/photos/${photoId}`);
     return response.data;
   }
 
@@ -183,6 +191,9 @@ class ApiService {
     lastName?: string;
     fullName?: string;
     dateOfBirth: string;
+    registrationFirstName?: string;
+    registrationLastName?: string;
+    registrationDateOfBirth?: string;
     expiryDate?: string;
     nationality?: string;
     gender?: string;
@@ -212,6 +223,24 @@ class ApiService {
     const response = await this.client.get('/users/me');
     return response.data;
   }
+
+async getProfileInsights() {
+  try {
+    const response = await this.client.get('/users/me/insights');
+    return response.data;
+  } catch (error: any) {
+    console.warn('Profile insights unavailable:', error.response?.status || error.message);
+    // Return safe defaults
+    return {
+      totalLikesReceived: 0,
+      likesReceivedLastWeek: 0,
+      likesTrend: 0,
+      superLikesReceived: 0,
+      totalMatches: 0,
+      profileViews: 0,
+    };
+  }
+}
 
   async updateProfile(data: {
     firstName?: string;
@@ -335,12 +364,108 @@ class ApiService {
     return response.data;
   }
 
-  // Face comparison using server-side face-api.js
-  async compareFaces(image1: string, image2: string) {
-    const response = await this.client.post('/verification/face-compare', {
-      image1,
-      image2,
-    });
+   // Face comparison using external backend API
+   // Configure via EXPO_PUBLIC_FACE_VERIFICATION_API_URL environment variable
+   // This should point to your Node.js backend endpoint (e.g., http://localhost:5000/api/users/verify-face)
+   async compareFaces(image1: string, image2: string) {
+     const externalApiUrl = process.env.EXPO_PUBLIC_FACE_VERIFICATION_API_URL;
+     
+     if (!externalApiUrl) {
+       console.warn('Face verification API URL not configured. Set EXPO_PUBLIC_FACE_VERIFICATION_API_URL');
+       return { 
+         success: false, 
+         similarity: 0, 
+         isMatch: false, 
+         message: 'Face verification API not configured' 
+       };
+     }
+     
+     try {
+        // Create FormData with the two images as file uploads
+        const formData = new FormData();
+        
+        // Helper to append image file to FormData for React Native
+        // React Native fetch understands { uri, type, name } objects
+        const appendImageFile = (uri: string, fieldName: string) => {
+          formData.append(fieldName, {
+            uri,
+            type: 'image/jpeg',
+            name: `${fieldName}.jpg`,
+          } as any);
+        };
+        
+        appendImageFile(image1, 'img1');
+        appendImageFile(image2, 'img2');
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        
+        const response = await fetch(externalApiUrl, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+          // Don't set Content-Type - fetch will set it with boundary for FormData
+        });
+        
+        clearTimeout(timeoutId);
+       
+       if (!response.ok) {
+         const errorText = await response.text();
+         throw new Error(`Face verification API error (${response.status}): ${errorText}`);
+       }
+       
+       const data = await response.json();
+       
+       // Backend returns DeepFace response with `verified` boolean and `distance` value
+       // We need to convert to our standard format
+       const isMatch = data.verified === true;
+       const similarity = data.distance ? (1 - data.distance) : (data.confidence ? data.confidence / 100 : 0);
+       const threshold = data.threshold || 0.68;
+       
+       return {
+         success: true,
+         similarity,
+         isMatch,
+         threshold,
+         message: isMatch ? 'Face match confirmed' : 'Faces do not match',
+         // Include extra data for debugging
+         rawResponse: {
+           distance: data.distance,
+           confidence: data.confidence,
+           model: data.model,
+           detectorBackend: data.detector_backend,
+           facialAreas: data.facial_areas,
+         }
+       };
+     } catch (error: any) {
+       console.error('External face comparison error:', error);
+       return {
+         success: false,
+         similarity: 0,
+         isMatch: false,
+         message: error.message || 'Face comparison failed',
+       };
+     }
+   }
+
+  // Live verification - submit live detection results to backend
+  async submitLiveVerification(data: {
+    similarity: number;
+    confidence: number;
+    isMatch: boolean;
+    photosMatched: number;
+    totalPhotos: number;
+  }) {
+    const response = await this.client.post('/users/me/live-verification', data);
+    return response.data;
+  }
+
+  // Get live verification history
+  async getLiveVerificationHistory(limit?: number, offset?: number) {
+    const params: any = {};
+    if (limit) params.limit = limit;
+    if (offset) params.offset = offset;
+    const response = await this.client.get('/users/me/live-verification/history', { params });
     return response.data;
   }
 }

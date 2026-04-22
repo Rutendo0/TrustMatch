@@ -1,14 +1,10 @@
 import { prisma } from '../lib/prisma';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Verification Service (Jumio/Didit removed)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export class VerificationService {
   // Placeholder for future verification providers
   async createVerificationSession(userId: string, email: string): Promise<{ sessionId: string; sessionUrl: string }> {
-    // Jumio/Didit has been removed - return placeholder values
-    // This method can be extended for other verification providers
+  
     return {
       sessionId: `local-${userId}-${Date.now()}`,
       sessionUrl: `${process.env.APP_URL || 'trustmatch://'}verification/local`,

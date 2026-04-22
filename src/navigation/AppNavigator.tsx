@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Image, StyleSheet, Platform } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { View, Image, StyleSheet, Platform, TouchableOpacity } from 'react-native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,7 +48,7 @@ export type RootStackParamList = {
   Dealbreakers: undefined;
   Settings: undefined;
   Filters: undefined;
-  ProfileDetail: { profile: any };
+  ProfileDetail: { profile: any; isOwnProfile?: boolean };
 };
 
 export type MainTabParamList = {
@@ -64,10 +64,10 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 
 const MainTabs = () => {
+  const navigation = useNavigation<any>();
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch current user profile for tab bar photo
     const fetchUserPhoto = async () => {
       try {
         const profile = await api.getProfile();
@@ -99,20 +99,6 @@ const MainTabs = () => {
             case 'Messages':
               iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
               break;
-            case 'Profile':
-              // Show user photo if available, otherwise show person icon
-              if (userPhoto) {
-                return (
-                  <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }}>
-                    <Image
-                      source={{ uri: userPhoto }}
-                      style={{ width: '100%', height: '100%' }}
-                    />
-                  </View>
-                );
-              }
-              iconName = focused ? 'person' : 'person-outline';
-              break;
             default:
               iconName = 'ellipse';
           }
@@ -127,10 +113,87 @@ const MainTabs = () => {
       })}
       detachInactiveScreens={false}
     >
-      <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: 'Discover' }} />
-      <Tab.Screen name="Likes" component={LikesScreen} options={{ tabBarLabel: 'Likes' }} />
-      <Tab.Screen name="Messages" component={MessagesScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Home" component={HomeScreen} options={{ 
+        tabBarLabel: 'Discover',
+        headerShown: true,
+        headerTitle: 'Discover',
+        headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: COLORS.white },
+        headerTitleStyle: { color: COLORS.text, fontWeight: 'bold', fontSize: 18 },
+        headerRight: () => (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginRight: 16 }}>
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+              <Ionicons 
+                name="settings-outline" 
+                size={24} 
+                color={COLORS.text} 
+              />
+            </TouchableOpacity>
+            {userPhoto ? (
+              <TouchableOpacity onPress={() => navigation.navigate('ProfileDetail', { profile: null, isOwnProfile: true })}>
+                <Image
+                  source={{ uri: userPhoto }}
+                  style={{ width: 32, height: 32, borderRadius: 16 }}
+                />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={() => navigation.navigate('ProfileDetail', { profile: null, isOwnProfile: true })}>
+                <Ionicons 
+                  name="person-circle-outline" 
+                  size={28} 
+                  color={COLORS.primary}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+        ),
+        headerLeft: () => (
+          <View style={{ marginLeft: 16 }}>
+            {userPhoto ? (
+              <Image source={{ uri: userPhoto }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+            ) : (
+              <Ionicons name="person-circle" size={36} color={COLORS.primary} />
+            )}
+          </View>
+        ),
+      }} />
+      <Tab.Screen name="Likes" component={LikesScreen} options={{ 
+        tabBarLabel: 'Likes',
+        headerShown: true,
+        headerTitle: 'Likes',
+        headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: COLORS.white },
+        headerTitleStyle: { color: COLORS.text, fontWeight: 'bold', fontSize: 18 },
+        headerRight: () => (
+          <View style={{ marginRight: 16 }}>
+            {userPhoto ? (
+              <Image source={{ uri: userPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} />
+            ) : (
+              <Ionicons name="person-circle-outline" size={28} color={COLORS.primary} />
+            )}
+          </View>
+        ),
+      }} />
+      <Tab.Screen name="Messages" component={MessagesScreen} options={{ 
+        headerShown: true,
+        headerTitle: 'Messages',
+        headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: COLORS.white },
+        headerTitleStyle: { color: COLORS.text, fontWeight: 'bold', fontSize: 18 },
+        headerRight: () => (
+          <View style={{ marginRight: 16 }}>
+            {userPhoto ? (
+              <Image source={{ uri: userPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} />
+            ) : (
+              <Ionicons name="person-circle-outline" size={28} color={COLORS.primary} />
+            )}
+          </View>
+        ),
+      }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ 
+        tabBarLabel: 'Profile',
+        headerShown: false,
+      }} />
     </Tab.Navigator>
   );
 };
@@ -184,14 +247,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    height: 80,
-    paddingBottom: 10,
-    paddingTop: 10,
-    ...SHADOWS.small,
+    height: 85,
+    paddingBottom: 20,
+    paddingTop: 5,
   },
   tabBarLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
+    fontWeight: '500',
+    marginTop: 0,
   },
 });

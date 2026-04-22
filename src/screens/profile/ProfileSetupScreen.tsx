@@ -104,9 +104,16 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
   const [education, setEducation] = useState('');
   const [relationshipGoal, setRelationshipGoal] = useState('');
   const [aboutMe, setAboutMe] = useState('');
+  const [city, setCity] = useState('');
+  const [country, setCountry] = useState('');
   const [currentStep, setCurrentStep] = useState(0);
+  
+  // Discovery preferences - set your default range
+  const [preferredAgeMin, setPreferredAgeMin] = useState(21);
+  const [preferredAgeMax, setPreferredAgeMax] = useState(50);
+  const [preferredMaxDistance, setPreferredMaxDistance] = useState(25);
 
-  const steps = ['About You', 'Interests & Hobbies', 'Lifestyle', 'Goals & Values'];
+  const steps = ['About You', 'Interests & Hobbies', 'Preferences', 'Goals & Values'];
 
   const toggleInterest = (interestId: string, interestName?: string) => {
     // Handle custom interest "Other" button
@@ -149,6 +156,14 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
   };
 
   const handleNext = async () => {
+    // Validate age range when on Preferences step (step 2)
+    if (currentStep === 2) {
+      if (preferredAgeMin >= preferredAgeMax) {
+        Alert.alert('Invalid Age Range', 'Minimum age must be less than maximum age.');
+        return;
+      }
+    }
+    
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
@@ -163,7 +178,36 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
           education,
           relationshipGoal,
           aboutMe,
+          city,
+          country,
           interests: allInterests,
+        });
+        
+        // Save discovery preferences
+        const interestedInMap: Record<string, string> = {
+          'Men': 'MALE',
+          'Women': 'FEMALE',
+        };
+        
+        // Get user's gender from formData or fetch profile
+        let userGender = formData.gender;
+        if (!userGender) {
+          try {
+            const profile = await api.getProfile();
+            userGender = profile.gender;
+          } catch (e) {
+            console.warn('Could not fetch user gender');
+          }
+        }
+        
+        // Default to showing opposite gender
+        const interestedIn = userGender === 'FEMALE' ? 'MALE' : 'FEMALE';
+        
+        await api.updatePreferences({
+          ageRangeMin: preferredAgeMin,
+          ageRangeMax: preferredAgeMax,
+          maxDistance: preferredMaxDistance,
+          interestedIn,
         });
         
         console.log('Profile saved successfully');
@@ -186,6 +230,8 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
           education,
           relationshipGoal,
           aboutMe,
+          city,
+          country,
         }
       });
     }
@@ -202,7 +248,7 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
   const canProceed = () => {
     switch (currentStep) {
       case 0:
-        return bio.length > 0 && occupation.length > 0;
+        return bio.length > 0 && occupation.length > 0 && city.length > 0 && country.length > 0;
       case 1:
         return selectedInterests.length >= 3;
       case 2:
@@ -242,6 +288,26 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
                 placeholder="What do you do for work?"
                 value={occupation}
                 onChangeText={setOccupation}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>City</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Which city do you live in?"
+                value={city}
+                onChangeText={setCity}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Country</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Which country are you from?"
+                value={country}
+                onChangeText={setCountry}
               />
             </View>
           </View>
@@ -358,6 +424,78 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
                 maxLength={300}
               />
               <Text style={styles.charCount}>{aboutMe.length}/300</Text>
+            </View>
+
+            {/* Discovery Preferences */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Preferred Age Range</Text>
+              <Text style={styles.inputSubtext}>Set your default preference for matches</Text>
+              <View style={styles.ageRangeInputs}>
+                <View style={styles.ageInputContainer}>
+                  <Text style={styles.ageInputLabel}>Min Age</Text>
+                  <TextInput
+                    style={styles.ageInput}
+                    value={String(preferredAgeMin)}
+                    onChangeText={(text) => {
+                      // Allow typing any number, clamp only when valid and complete
+                      const num = parseInt(text.replace(/[^0-9]/g, ''), 10);
+                      if (!isNaN(num) && num <= 99) {
+                        setPreferredAgeMin(num);
+                      } else if (text === '') {
+                        setPreferredAgeMin(18); // Reset to minimum when cleared
+                      }
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    placeholder="21"
+                    editable={true}
+                    selectTextOnFocus
+                  />
+                </View>
+                <Text style={styles.ageRangeSeparator}>to</Text>
+                <View style={styles.ageInputContainer}>
+                  <Text style={styles.ageInputLabel}>Max Age</Text>
+                  <TextInput
+                    style={styles.ageInput}
+                    value={String(preferredAgeMax)}
+                    onChangeText={(text) => {
+                      // Allow typing any number, clamp only when valid and complete
+                      const num = parseInt(text.replace(/[^0-9]/g, ''), 10);
+                      if (!isNaN(num) && num <= 99) {
+                        setPreferredAgeMax(num);
+                      } else if (text === '') {
+                        setPreferredAgeMax(50); // Reset to default when cleared
+                      }
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    placeholder="50"
+                    editable={true}
+                    selectTextOnFocus
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Maximum Distance (km)</Text>
+              <TextInput
+                style={styles.textInput}
+                value={String(preferredMaxDistance)}
+                onChangeText={(text) => {
+                  // Allow typing any number, clamp only when valid and complete
+                  const num = parseInt(text.replace(/[^0-9]/g, ''), 10);
+                  if (!isNaN(num) && num <= 500) {
+                    setPreferredMaxDistance(num);
+                  } else if (text === '') {
+                    setPreferredMaxDistance(25); // Reset to default when cleared
+                  }
+                }}
+                keyboardType="number-pad"
+                placeholder="25"
+                editable={true}
+                selectTextOnFocus
+              />
             </View>
           </View>
         );
@@ -550,6 +688,41 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'right',
     marginTop: SPACING.xs,
+  },
+  inputSubtext: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+  },
+  ageRangeInputs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: SPACING.sm,
+  },
+  ageInputContainer: {
+    flex: 1,
+  },
+  ageInputLabel: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  ageInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    fontSize: FONTS.sizes.md,
+    backgroundColor: COLORS.white,
+    textAlign: 'center',
+    minHeight: 50,
+    minWidth: 60,
+  },
+  ageRangeSeparator: {
+    fontSize: FONTS.sizes.md,
+    color: COLORS.textSecondary,
+    marginHorizontal: SPACING.md,
   },
   interestsContainer: {
     gap: SPACING.lg,

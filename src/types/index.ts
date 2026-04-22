@@ -8,16 +8,18 @@ export interface User {
   gender: 'male' | 'female';
   interestedIn: 'male' | 'female' | 'both';
   bio: string;
-  photos: string[];
-  location: {
-    city: string;
-    country: string;
-    coordinates?: {
-      latitude: number;
-      longitude: number;
-    };
-  };
+  aboutMe?: string;
+  occupation?: string;
+  education?: string;
+  relationshipGoal?: string;
+  interests?: string[];
+  city?: string;
+  country?: string;
+  photos: { id: string; url: string; order: number }[];
+  trustScore?: number;
   verification: VerificationStatus;
+  verificationBadges?: string[];
+  safetyFeatures?: string[];
   preferences: UserPreferences;
   createdAt: string;
   lastActive: string;
@@ -102,4 +104,5 @@ export interface RegistrationData {
   idDocument: VerificationDocument;
   selfie: LiveSelfie;
   deviceFingerprint: string;
+  identityFingerprint?: string;
 }

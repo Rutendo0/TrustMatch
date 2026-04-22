@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,20 +6,27 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
+  Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VerifiedBadge, Button } from '../../components/common';
+import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 import { normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import * as ImagePicker from 'expo-image-picker';
 
 interface Profile {
   id: string;
   name: string;
   age: number;
   bio: string;
+  aboutMe: string;
+  occupation: string;
+  education: string;
   distance: string;
   photos: string[];
   isVerified: boolean;
@@ -35,14 +42,144 @@ interface ProfileDetailScreenProps {
   navigation: NativeStackNavigationProp<any>;
   route: {
     params: {
-      profile: Profile;
+      profile: Profile | null;
+      isOwnProfile?: boolean;
     };
   };
 }
 
 export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ navigation, route }) => {
-  const { profile } = route.params;
+  const { profile: initialProfile, isOwnProfile: isOwnProfileParam } = route.params;
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [userData, setUserData] = useState<any>(null);
+  const [showImagePicker, setShowImagePicker] = useState(false);
+  const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
+
+  // Fetch user profile data
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
+
+  const fetchUserProfile = async () => {
+    try {
+      setIsLoading(true);
+      const data = await api.getProfile();
+      setUserData(data);
+      // Check if viewing own profile based on whether profile.id matches current user
+      setIsCurrentUserProfile(isOwnProfileParam || !initialProfile || initialProfile?.id === 'current-user' || data?.id === initialProfile?.id);
+    } catch (error) {
+      console.error('Failed to fetch profile:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Default profile to prevent null access
+  const defaultProfile: Profile = {
+    id: 'current-user',
+    name: 'My Profile',
+    age: 25,
+    bio: 'Edit your profile to add a bio',
+    aboutMe: '',
+    occupation: '',
+    education: '',
+    distance: '',
+    photos: ['https://via.placeholder.com/400'],
+    isVerified: true,
+    trustScore: 95,
+    compatibility: 0,
+    personalityType: 'N/A',
+    interests: [],
+    safetyFeatures: ['Verified'],
+    verificationBadges: ['Identity', 'Selfie']
+  };
+
+  // Calculate age from dateOfBirth
+  const calculateAge = (dateOfBirth: string) => {
+    if (!dateOfBirth) return 25;
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age > 0 ? age : 25;
+  };
+
+  // Use real user data if available
+  const profile: Profile = userData ? {
+    id: userData.id || 'current-user',
+    name: userData.firstName || 'User',
+    age: calculateAge(userData.dateOfBirth),
+    bio: userData.bio || 'No bio yet',
+    aboutMe: userData.aboutMe || '',
+    occupation: userData.occupation || '',
+    education: userData.education || '',
+    distance: userData.city || userData.country || '',
+    photos: userData.photos?.filter((p: any) => p.url)?.map((p: any) => p.url) || [],
+    isVerified: userData.isVerified || false,
+    trustScore: userData.trustScore || userData.verification?.trustScore || 85,
+    compatibility: 0,
+    personalityType: userData.personalityType || 'N/A',
+    interests: userData.interests || [],
+    safetyFeatures: userData.safetyFeatures || (userData.isVerified ? ['Verified'] : []),
+    verificationBadges: userData.verificationBadges || []
+  } : initialProfile || defaultProfile;
+
+  const canDeletePhoto = profile.photos.length > 3;
+  const canAddPhoto = profile.photos.length < 6;
+
+  const handleAddPhoto = async () => {
+    if (!canAddPhoto) {
+      Alert.alert('Limit Reached', 'You can only have up to 6 photos');
+      return;
+    }
+    
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      try {
+        await api.uploadProfilePhoto(result.assets[0].uri);
+        await fetchUserProfile(); // Refresh data
+      } catch (error) {
+        Alert.alert('Error', 'Failed to upload photo');
+      }
+    }
+  };
+
+  const handleDeletePhoto = async (photoId: string) => {
+    if (!canDeletePhoto) {
+      Alert.alert('Cannot Delete', 'You must have at least 3 photos');
+      return;
+    }
+
+    Alert.alert(
+      'Delete Photo',
+      'Are you sure you want to delete this photo?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.deletePhoto(photoId);
+              await fetchUserProfile(); // Refresh data
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete photo');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const handleLike = () => {
     // Profile liked action
@@ -66,6 +203,16 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
     }
   };
 
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -76,7 +223,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
         >
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{profile.name}'s Profile</Text>
+        <Text style={styles.headerTitle}>{isCurrentUserProfile ? 'My Profile' : `${profile.name}'s Profile`}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -155,30 +302,63 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
               <Text style={styles.distance}>
                 <Ionicons name="location" size={16} color={COLORS.white} /> {profile.distance}
               </Text>
+              
+              {(profile.occupation || profile.education) && (
+                <View style={styles.workEducationRow}>
+                  {profile.occupation && (
+                    <Text style={styles.workEducation}>
+                      <Ionicons name="briefcase" size={14} color={COLORS.white} /> {profile.occupation}
+                    </Text>
+                  )}
+                  {profile.education && (
+                    <Text style={styles.workEducation}>
+                      <Ionicons name="school" size={14} color={COLORS.white} /> {profile.education}
+                    </Text>
+                  )}
+                </View>
+              )}
             </View>
           </View>
 
           {/* Thumbnail Strip */}
-          {profile.photos.length > 1 && (
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={styles.thumbnailStrip}
-              contentContainerStyle={styles.thumbnailContent}
-            >
-              {profile.photos.map((photo, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.thumbnail,
-                    index === currentPhotoIndex && styles.activeThumbnail
-                  ]}
-                  onPress={() => setCurrentPhotoIndex(index)}
-                >
-                  <Image source={{ uri: photo }} style={styles.thumbnailImage} />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+          {profile.photos.length > 0 && (
+            <View style={styles.thumbnailSection}>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                style={styles.thumbnailStrip}
+                contentContainerStyle={styles.thumbnailContent}
+              >
+                {profile.photos.map((photo, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.thumbnail,
+                      index === currentPhotoIndex && styles.activeThumbnail
+                    ]}
+                    onPress={() => setCurrentPhotoIndex(index)}
+                  >
+                    <Image source={{ uri: photo }} style={styles.thumbnailImage} />
+                    {index === currentPhotoIndex && canDeletePhoto && (
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => handleDeletePhoto(userData?.photos?.[index]?.id)}
+                      >
+                        <Ionicons name="trash" size={14} color={COLORS.white} />
+                      </TouchableOpacity>
+                    )}
+                  </TouchableOpacity>
+                ))}
+                {canAddPhoto && (
+                  <TouchableOpacity
+                    style={styles.addThumbnail}
+                    onPress={handleAddPhoto}
+                  >
+                    <Ionicons name="add" size={24} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            </View>
           )}
         </View>
 
@@ -190,8 +370,14 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
               <Ionicons name="person" size={20} color={COLORS.primary} />
               <Text style={styles.infoTitle}>About</Text>
             </View>
-            <Text style={styles.personalityType}>{profile.personalityType}</Text>
-            <Text style={styles.bio}>{profile.bio}</Text>
+            {profile.personalityType && profile.personalityType !== 'N/A' && (
+              <Text style={styles.personalityType}>{profile.personalityType}</Text>
+            )}
+            {profile.aboutMe ? (
+              <Text style={styles.bio}>{profile.aboutMe}</Text>
+            ) : (
+              <Text style={styles.bio}>{profile.bio}</Text>
+            )}
           </View>
 
           {/* Safety Features */}
@@ -237,22 +423,37 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
         <View style={styles.bottomPadding} />
       </ScrollView>
 
-      {/* Action Buttons */}
-      <View style={styles.actionBar}>
-        <TouchableOpacity
-          style={styles.passButton}
-          onPress={handlePass}
-        >
-          <Ionicons name="close" size={32} color={COLORS.error} />
-        </TouchableOpacity>
+      {/* Action Buttons - Only show for other users' profiles */}
+      {!isCurrentUserProfile && (
+        <View style={styles.actionBar}>
+          <TouchableOpacity
+            style={styles.passButton}
+            onPress={handlePass}
+          >
+            <Ionicons name="close" size={32} color={COLORS.error} />
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.likeButton}
-          onPress={handleLike}
-        >
-          <Ionicons name="heart" size={32} color={COLORS.white} />
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={styles.likeButton}
+            onPress={handleLike}
+          >
+            <Ionicons name="heart" size={32} color={COLORS.white} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Edit Button - Only show for own profile */}
+      {isCurrentUserProfile && (
+        <View style={styles.editActionBar}>
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => navigation.navigate('ProfileSetup', { formData: userData })}
+          >
+            <Ionicons name="create-outline" size={24} color={COLORS.white} />
+            <Text style={styles.editButtonText}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -261,6 +462,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    fontSize: normalize(FONTS.sizes.md),
+    color: COLORS.textSecondary,
   },
   header: {
     flexDirection: 'row',
@@ -410,8 +621,45 @@ const styles = StyleSheet.create({
     fontSize: 14,
     opacity: 0.9,
   },
+  workEducationRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 4,
+    gap: 12,
+  },
+  workEducation: {
+    color: COLORS.white,
+    fontSize: 12,
+    opacity: 0.9,
+  },
   thumbnailStrip: {
     backgroundColor: COLORS.white,
+  },
+  thumbnailSection: {
+    backgroundColor: COLORS.white,
+    paddingVertical: SPACING.sm,
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.background,
   },
   thumbnailContent: {
     paddingHorizontal: SPACING.lg,
@@ -552,5 +800,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOWS.medium,
+  },
+  editActionBar: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    backgroundColor: COLORS.white,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: normalize(SPACING.xl),
+    paddingVertical: normalize(SPACING.md),
+    borderRadius: BORDER_RADIUS.full,
+    ...SHADOWS.medium,
+  },
+  editButtonText: {
+    color: COLORS.white,
+    fontSize: normalize(FONTS.sizes.md),
+    fontWeight: '600',
+    marginLeft: SPACING.sm,
   },
 });

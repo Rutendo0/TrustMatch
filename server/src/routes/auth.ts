@@ -11,6 +11,7 @@ import { sendVerificationEmail, verifyEmailCode, resendVerificationCode } from '
 const router = Router();
 
 const REFRESH_TOKEN_EXPIRY_DAYS = 30;
+const IDENTITY_FP_PREFIX = 'identity:';
 
 const generateAccessToken = (userId: string): string => {
   const secret = process.env.JWT_SECRET!;
@@ -35,8 +36,10 @@ router.post(
     body('password').isLength({ min: 8 }),
     body('firstName').notEmpty().trim(),
     body('lastName').notEmpty().trim(),
+    body('dateOfBirth').notEmpty().isISO8601(),
     body('gender').isIn(['MALE', 'FEMALE']),
     body('deviceFingerprint').notEmpty(),
+    body('identityFingerprint').optional().isString().trim().notEmpty(),
   ],
   async (req: Request, res: Response) => {
     try {
@@ -57,6 +60,7 @@ router.post(
         dateOfBirth,
         gender,
         deviceFingerprint,
+        identityFingerprint,
       } = req.body;
 
       // Parse dateOfBirth - accept both ISO8601 and DD/MM/YYYY formats
@@ -91,6 +95,19 @@ router.post(
       
       // If user already exists, check if they can log in (return token)
       if (existingUser) {
+        if (identityFingerprint) {
+          const existingIdentityRecord = await prisma.deviceFingerprint.findFirst({
+            where: {
+              userId: existingUser.id,
+              deviceId: `${IDENTITY_FP_PREFIX}${identityFingerprint}`,
+              platform: 'identity_document',
+            },
+          });
+          if (!existingIdentityRecord) {
+            throw new AppError('This email is already linked to a different identity document', 400);
+          }
+        }
+
         // Verify password and return token
         const isValidPassword = await bcrypt.compare(password, existingUser.passwordHash);
         if (isValidPassword) {
@@ -121,6 +138,19 @@ router.post(
         throw new AppError('Account creation blocked', 403);
       }
 
+      if (identityFingerprint) {
+        const usedIdentity = await prisma.deviceFingerprint.findFirst({
+          where: {
+            deviceId: `${IDENTITY_FP_PREFIX}${identityFingerprint}`,
+            platform: 'identity_document',
+          },
+          select: { userId: true },
+        });
+        if (usedIdentity) {
+          throw new AppError('This ID document is already linked to another account', 400);
+        }
+      }
+
       // Skip device check for now - device fingerprint issues shouldn't block registration
       // The device check can be re-enabled once basic registration works
       /*
@@ -149,13 +179,26 @@ router.post(
           interestedIn,
           verification: { create: {} },
           deviceFingerprints: {
-            create: {
-              deviceId: deviceFingerprint,
-              platform: req.body.platform || 'unknown',
-              osVersion: req.body.osVersion,
-              appVersion: req.body.appVersion,
-              ipAddress: req.ip,
-            },
+            create: [
+              {
+                deviceId: deviceFingerprint,
+                platform: req.body.platform || 'unknown',
+                osVersion: req.body.osVersion,
+                appVersion: req.body.appVersion,
+                ipAddress: req.ip,
+              },
+              ...(identityFingerprint
+                ? [
+                    {
+                      deviceId: `${IDENTITY_FP_PREFIX}${identityFingerprint}`,
+                      platform: 'identity_document',
+                      osVersion: null,
+                      appVersion: null,
+                      ipAddress: req.ip,
+                    },
+                  ]
+                : []),
+            ],
           },
         },
         include: { verification: true },

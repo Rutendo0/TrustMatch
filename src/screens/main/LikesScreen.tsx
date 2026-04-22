@@ -124,10 +124,28 @@ export const LikesScreen: React.FC = () => {
   const [receivedLikes, setReceivedLikes] = useState<LikeProfile[]>([]);
   const [sentLikes, setSentLikes] = useState<LikeProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [insights, setInsights] = useState<{
+    totalLikesReceived: number;
+    likesReceivedLastWeek: number;
+    likesTrend: number;
+    superLikesReceived: number;
+    totalMatches: number;
+    profileViews: number;
+  } | null>(null);
 
   useEffect(() => {
     fetchLikes();
+    fetchInsights();
   }, []);
+
+  const fetchInsights = async () => {
+    try {
+      const data = await api.getProfileInsights();
+      setInsights(data);
+    } catch (error) {
+      console.error('Failed to fetch insights:', error);
+    }
+  };
 
   const fetchLikes = async () => {
     try {
@@ -184,11 +202,13 @@ export const LikesScreen: React.FC = () => {
     return date.toLocaleDateString();
   };
 
-  const visibleLikes = isPremium ? currentLikes : currentLikes.slice(0, 1);
-  const blurredCount = isPremium ? 0 : Math.max(0, currentLikes.length - 1);
+  // Show all likes without premium restriction
+  const visibleLikes = currentLikes;
+  const blurredCount = 0;
 
   const renderProfileCard = (profile: LikeProfile, index: number, isReceived: boolean) => {
-    const isBlurred = isReceived && !isPremium && index > 0;
+    // No blur anymore - show all real likes
+    const isBlurred = false;
     
     return (
       <TouchableOpacity
@@ -263,7 +283,7 @@ export const LikesScreen: React.FC = () => {
         <Text style={styles.headerTitle}>Likes</Text>
         <View style={styles.likeCount}>
           <Ionicons name="heart" size={18} color={COLORS.primary} />
-          <Text style={styles.likeCountText}>{MOCK_LIKES.length}</Text>
+          <Text style={styles.likeCountText}>{insights?.totalLikesReceived ?? receivedLikes.length}</Text>
         </View>
       </View>
 
@@ -283,7 +303,7 @@ export const LikesScreen: React.FC = () => {
           </Text>
           <View style={[styles.tabBadge, activeTab === 'received' && styles.activeTabBadge]}>
             <Text style={[styles.tabBadgeText, activeTab === 'received' && styles.activeTabBadgeText]}>
-              {MOCK_LIKES.length}
+              {insights?.totalLikesReceived ?? receivedLikes.length}
             </Text>
           </View>
         </TouchableOpacity>
@@ -302,7 +322,7 @@ export const LikesScreen: React.FC = () => {
           </Text>
           <View style={[styles.tabBadge, activeTab === 'sent' && styles.activeTabBadge]}>
             <Text style={[styles.tabBadgeText, activeTab === 'sent' && styles.activeTabBadgeText]}>
-              {MOCK_SENT_LIKES.length}
+              {sentLikes.length}
             </Text>
           </View>
         </TouchableOpacity>
@@ -328,8 +348,8 @@ export const LikesScreen: React.FC = () => {
 
         <View style={styles.grid}>
           {activeTab === 'received' 
-            ? MOCK_LIKES.map((profile, index) => renderProfileCard(profile, index, true))
-            : MOCK_SENT_LIKES.map((profile, index) => renderProfileCard(profile, index, false))
+            ? receivedLikes.map((profile, index) => renderProfileCard(profile, index, true))
+            : sentLikes.map((profile, index) => renderProfileCard(profile, index, false))
           }
         </View>
 
@@ -343,7 +363,7 @@ export const LikesScreen: React.FC = () => {
                   <Ionicons name="eye" size={24} color={COLORS.primary} />
                 </View>
                 <View style={styles.insightContent}>
-                  <Text style={styles.insightValue}>156</Text>
+                  <Text style={styles.insightValue}>{insights?.profileViews ?? 0}</Text>
                   <Text style={styles.insightLabel}>Profile Views (7 days)</Text>
                 </View>
                 <View style={styles.insightTrend}>
@@ -359,12 +379,14 @@ export const LikesScreen: React.FC = () => {
                   <Ionicons name="heart" size={24} color={COLORS.error} />
                 </View>
                 <View style={styles.insightContent}>
-                  <Text style={styles.insightValue}>89</Text>
+                  <Text style={styles.insightValue}>{insights?.likesReceivedLastWeek ?? 0}</Text>
                   <Text style={styles.insightLabel}>Likes Received (7 days)</Text>
                 </View>
                 <View style={styles.insightTrend}>
-                  <Ionicons name="trending-up" size={16} color={COLORS.success} />
-                  <Text style={styles.trendText}>+15%</Text>
+                  <Ionicons name={insights?.likesTrend && insights.likesTrend >= 0 ? "trending-up" : "trending-down"} size={16} color={insights?.likesTrend && insights.likesTrend >= 0 ? COLORS.success : COLORS.error} />
+                  <Text style={[styles.trendText, { color: insights?.likesTrend && insights.likesTrend >= 0 ? COLORS.success : COLORS.error }]}>
+                    {insights?.likesTrend ? (insights.likesTrend >= 0 ? `+${insights.likesTrend}%` : `${insights.likesTrend}%`) : '0%'}
+                  </Text>
                 </View>
               </View>
             </Card>
@@ -375,7 +397,7 @@ export const LikesScreen: React.FC = () => {
                   <Ionicons name="star" size={24} color="#F59E0B" />
                 </View>
                 <View style={styles.insightContent}>
-                  <Text style={styles.insightValue}>12</Text>
+                  <Text style={styles.insightValue}>{insights?.superLikesReceived ?? 0}</Text>
                   <Text style={styles.insightLabel}>Super Likes Received</Text>
                 </View>
               </View>

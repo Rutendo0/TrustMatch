@@ -8,6 +8,7 @@ import {
   Switch,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
+import * as SecureStore from 'expo-secure-store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Card, Button } from '../../components/common';
@@ -24,8 +25,10 @@ interface FilterState {
   minTrustScore: number;
   personalityTypes: string[];
   interests: string[];
-  showMe: 'Men' | 'Women' | 'Everyone';
+  showMe: 'Men' | 'Women';
 }
+
+const FILTER_PREFERENCES_KEY = 'trustmatch_filter_preferences_v1';
 
 const PERSONALITY_TYPES = [
   { id: 'INTJ', label: 'INTJ' },
@@ -55,7 +58,7 @@ const AVAILABLE_INTERESTS = [
 
 export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [filters, setFilters] = useState<FilterState>({
-    ageRange: [24, 35],
+    ageRange: [21, 50],
     maxDistance: 25,
     showVerifiedOnly: true,
     showWithPhotos: true,
@@ -63,10 +66,11 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     minTrustScore: 70,
     personalityTypes: [],
     interests: [],
-    showMe: 'Everyone',
+    showMe: 'Men',
   });
 
   const [hasChanges, setHasChanges] = useState(false);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
 
   const updateFilter = (key: keyof FilterState, value: any) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -95,15 +99,15 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   const resetFilters = () => {
     setFilters({
-      ageRange: [18, 99],
-      maxDistance: 100,
+      ageRange: [21, 50],
+      maxDistance: 50,
       showVerifiedOnly: false,
       showWithPhotos: false,
       showOnlineOnly: false,
       minTrustScore: 0,
       personalityTypes: [],
       interests: [],
-      showMe: 'Everyone',
+      showMe: 'Men',
     });
     setHasChanges(false);
   };
@@ -115,28 +119,96 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   const loadPreferences = async () => {
     try {
-      const profile = await api.getProfile();
-      if (profile.preferences) {
-        setFilters(prev => ({
-          ...prev,
-          ageRange: [profile.preferences.ageRangeMin || 18, profile.preferences.ageRangeMax || 99],
-          maxDistance: profile.preferences.maxDistance || 25,
-        }));
+      const [profile, storedFiltersRaw] = await Promise.all([
+        api.getProfile(),
+        SecureStore.getItemAsync(FILTER_PREFERENCES_KEY),
+      ]);
+      console.log('Profile data for preferences:', JSON.stringify(profile, null, 2));
+
+      // Get age range - check both nested preferences and top-level fields
+      const ageMin = profile.preferences?.ageRangeMin ?? profile.ageRangeMin ?? 21;
+      const ageMax = profile.preferences?.ageRangeMax ?? profile.ageRangeMax ?? 50;
+      const distance = profile.preferences?.maxDistance ?? profile.maxDistance ?? 25;
+
+      // Set showMe based on saved preference or user's gender
+      let defaultShowMe: 'Men' | 'Women';
+      if (profile.preferences?.interestedIn) {
+        // Use saved preference - convert MALE/FEMALE to Men/Women
+        defaultShowMe = profile.preferences.interestedIn === 'MALE' ? 'Men' : 'Women';
+      } else if (profile.gender) {
+        // Auto-select opposite gender based on user's gender
+        defaultShowMe = profile.gender === 'FEMALE' ? 'Men' : 'Women';
+      } else {
+        // Default fallback
+        defaultShowMe = 'Men';
       }
+
+      let storedFilters: Partial<FilterState> = {};
+      if (storedFiltersRaw) {
+        try {
+          storedFilters = JSON.parse(storedFiltersRaw);
+        } catch (parseError) {
+          console.warn('Failed to parse saved filters, using defaults:', parseError);
+        }
+      }
+
+      const profileInterests = Array.isArray(profile.interests) ? profile.interests : [];
+
+      setFilters(prev => ({
+        ...prev,
+        ...storedFilters,
+        ageRange: [ageMin, ageMax],
+        maxDistance: distance,
+        showMe: defaultShowMe,
+        interests: Array.isArray(storedFilters.interests)
+          ? storedFilters.interests
+          : profileInterests,
+        personalityTypes: Array.isArray(storedFilters.personalityTypes)
+          ? storedFilters.personalityTypes
+          : [],
+      }));
+
+      setHasChanges(false);
+      setPreferencesLoaded(true);
     } catch (error) {
       console.error('Failed to load preferences:', error);
+      setPreferencesLoaded(true);
     }
   };
 
   const applyFilters = async () => {
     try {
+      // Convert 'Men'/'Women' to 'MALE'/'FEMALE' for backend
+      const interestedInMap: Record<string, string> = {
+        'Men': 'MALE',
+        'Women': 'FEMALE',
+      };
+      
       // Save preferences to server
       await api.updatePreferences({
         ageRangeMin: filters.ageRange[0],
         ageRangeMax: filters.ageRange[1],
         maxDistance: filters.maxDistance,
-        interestedIn: filters.showMe === 'Everyone' ? undefined : filters.showMe,
+        interestedIn: interestedInMap[filters.showMe],
       });
+
+      // Persist filter-specific fields that are not part of /users/preferences.
+      await api.updateProfile({
+        interests: filters.interests,
+      });
+
+      await SecureStore.setItemAsync(
+        FILTER_PREFERENCES_KEY,
+        JSON.stringify({
+          showVerifiedOnly: filters.showVerifiedOnly,
+          showWithPhotos: filters.showWithPhotos,
+          showOnlineOnly: filters.showOnlineOnly,
+          minTrustScore: filters.minTrustScore,
+          personalityTypes: filters.personalityTypes,
+          interests: filters.interests,
+        })
+      );
+
       console.log('Preferences saved successfully');
     } catch (error) {
       console.error('Failed to save preferences:', error);
@@ -172,7 +244,7 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           <View style={styles.settingRow}>
             <Text style={styles.settingLabel}>Show Me</Text>
             <View style={styles.segmentControl}>
-              {(['Men', 'Women', 'Everyone'] as const).map((option) => (
+              {(['Men', 'Women'] as const).map((option) => (
                 <TouchableOpacity
                   key={option}
                   style={[

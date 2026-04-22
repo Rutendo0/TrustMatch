@@ -12,10 +12,11 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Card, VerifiedBadge } from '../../components/common';
+import { LiveVerificationBadge } from '../../components/verification/LiveVerificationBadge';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP, wp, hp } from '../../hooks/useResponsive';
 import { ErrorBoundary } from '../../components/common/ErrorBoundary';
@@ -35,6 +36,14 @@ export const ProfileScreen: React.FC = () => {
     fetchProfile();
     fetchLikesAndMatches();
   }, []);
+
+  // Refresh profile data when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchProfile();
+      fetchLikesAndMatches();
+    }, [])
+  );
 
   const fetchProfile = async () => {
     try {
@@ -199,6 +208,54 @@ export const ProfileScreen: React.FC = () => {
 
             <Text style={styles.bio}>{user.bio || 'No bio added yet. Tap edit to add your bio!'}</Text>
 
+            {/* Profile Details Section */}
+            {(user.occupation || user.education || user.relationshipGoal || user.aboutMe || (user.interests && user.interests.length > 0) || user.city || user.country) && (
+              <View style={styles.profileDetailsSection}>
+                {(user.city || user.country) && (
+                  <View style={styles.detailItem}>
+                    <Ionicons name="location-outline" size={normalize(18)} color={COLORS.textSecondary} />
+                    <Text style={styles.detailText}>{user.city}{user.city && user.country ? ', ' : ''}{user.country}</Text>
+                  </View>
+                )}
+                {user.occupation && (
+                  <View style={styles.detailItem}>
+                    <Ionicons name="briefcase-outline" size={normalize(18)} color={COLORS.textSecondary} />
+                    <Text style={styles.detailText}>{user.occupation}</Text>
+                  </View>
+                )}
+                {user.education && (
+                  <View style={styles.detailItem}>
+                    <Ionicons name="school-outline" size={normalize(18)} color={COLORS.textSecondary} />
+                    <Text style={styles.detailText}>{user.education}</Text>
+                  </View>
+                )}
+                {user.relationshipGoal && (
+                  <View style={styles.detailItem}>
+                    <Ionicons name="heart-outline" size={normalize(18)} color={COLORS.textSecondary} />
+                    <Text style={styles.detailText}>Looking for: {user.relationshipGoal}</Text>
+                  </View>
+                )}
+                {user.aboutMe && (
+                  <View style={styles.detailItem}>
+                    <Ionicons name="person-outline" size={normalize(18)} color={COLORS.textSecondary} />
+                    <Text style={styles.detailText}>{user.aboutMe}</Text>
+                  </View>
+                )}
+                {user.interests && user.interests.length > 0 && (
+                  <View style={styles.interestsContainer}>
+                    <Ionicons name="sparkles-outline" size={normalize(18)} color={COLORS.textSecondary} />
+                    <View style={styles.interestsList}>
+                      {user.interests.slice(0, 5).map((interest: string, index: number) => (
+                        <View key={index} style={styles.interestTag}>
+                          <Text style={styles.interestText}>{interest}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{likesCount}</Text>
@@ -254,8 +311,28 @@ export const ProfileScreen: React.FC = () => {
                 />
                 <Text style={styles.badgeText}>Phone Verified</Text>
               </View>
+              {user?.verification?.liveVerified && (
+                <View style={styles.badgeItem}>
+                  <Ionicons 
+                    name="shield-checkmark" 
+                    size={normalize(16)} 
+                    color={COLORS.success} 
+                  />
+                  <Text style={styles.badgeText}>Live Verified</Text>
+                </View>
+              )}
             </View>
           </Card>
+
+          {/* Live Verification Badge */}
+          <LiveVerificationBadge
+            style={styles.liveVerificationBadge}
+            onVerificationComplete={(result) => {
+              console.log('Live verification completed:', result);
+              // Refresh profile to show updated verification status
+              fetchProfile();
+            }}
+          />
 
           <Card style={styles.preferencesCard}>
             <Text style={styles.sectionTitle}>Discovery Preferences</Text>
@@ -272,7 +349,7 @@ export const ProfileScreen: React.FC = () => {
                 <Ionicons name="people" size={normalize(20)} color={COLORS.textSecondary} />
                 <Text style={styles.preferenceText}>Show Me</Text>
               </View>
-              <Text style={styles.preferenceValue}>{user.preferences?.showMe || 'Everyone'}</Text>
+              <Text style={styles.preferenceValue}>{user.preferences?.interestedIn === 'FEMALE' ? 'Women' : user.preferences?.interestedIn === 'MALE' ? 'Men' : 'Men'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
@@ -288,7 +365,7 @@ export const ProfileScreen: React.FC = () => {
                 <Text style={styles.preferenceText}>Age Range</Text>
               </View>
               <Text style={styles.preferenceValue}>
-                {user.preferences?.ageRange?.min || 18} - {user.preferences?.ageRange?.max || 50}
+                {user.preferences?.ageRangeMin || 18} - {user.preferences?.ageRangeMax || 50}
               </Text>
             </TouchableOpacity>
 
@@ -304,7 +381,7 @@ export const ProfileScreen: React.FC = () => {
                 <Ionicons name="location" size={normalize(20)} color={COLORS.textSecondary} />
                 <Text style={styles.preferenceText}>Maximum Distance</Text>
               </View>
-              <Text style={styles.preferenceValue}>{user.preferences?.distance || 25} km</Text>
+              <Text style={styles.preferenceValue}>{user.preferences?.maxDistance || 25} km</Text>
             </TouchableOpacity>
           </Card>
 
@@ -533,6 +610,43 @@ const styles = StyleSheet.create({
     marginBottom: normalize(SPACING.lg),
     paddingHorizontal: normalize(SPACING.sm),
   },
+  profileDetailsSection: {
+    marginBottom: normalize(SPACING.md),
+    paddingHorizontal: normalize(SPACING.sm),
+  },
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: normalize(SPACING.sm),
+  },
+  detailText: {
+    fontSize: normalize(FONTS.sizes.md),
+    color: COLORS.text,
+    marginLeft: normalize(SPACING.sm),
+  },
+  interestsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: normalize(SPACING.xs),
+  },
+  interestsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginLeft: normalize(SPACING.sm),
+    marginTop: normalize(2),
+  },
+  interestTag: {
+    backgroundColor: COLORS.primary + '20',
+    paddingHorizontal: normalize(SPACING.sm),
+    paddingVertical: normalize(4),
+    borderRadius: normalize(12),
+    marginRight: normalize(6),
+    marginBottom: normalize(4),
+  },
+  interestText: {
+    fontSize: normalize(FONTS.sizes.sm),
+    color: COLORS.primary,
+  },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -729,5 +843,9 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     textAlign: 'center',
     marginBottom: normalize(SPACING.xl),
+  },
+  liveVerificationBadge: {
+    marginHorizontal: normalize(SPACING.lg),
+    marginBottom: normalize(SPACING.md),
   },
 });

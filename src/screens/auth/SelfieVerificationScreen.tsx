@@ -19,6 +19,7 @@ import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { AISecurityService, VerificationResult, LivenessResult } from '../../services/AISecurityService';
 import { api } from '../../services/api';
 import { compareIdAndSelfie, comprehensiveFaceComparison, ComprehensiveFaceComparisonResult, FaceComparisonResult } from '../../services/FaceComparisonService';
+import { LiveDetectionService } from '../../services/LiveDetectionService';
 
 type SelfieVerificationScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -45,6 +46,8 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
     { icon: '👤', text: 'Position your face in the center of the frame' },
     { icon: '😐', text: 'Keep a neutral expression' },
     { icon: '🚫', text: 'Remove sunglasses, hats, or face coverings' },
+    { icon: '📸', text: 'Ensure your face matches your profile photos' },
+    { icon: '🔄', text: 'This prevents catfishing by verifying you are who you say you are' },
   ];
 
   const handleStartCamera = async () => {
@@ -109,7 +112,42 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         return;
       }
 
-      // Step 2: Estimate age using actual birth date
+      // Step 2: Live Detection (Anti-Catfishing)
+      console.log('Starting live detection for anti-catfishing...');
+      setProcessingStep('faceMatch');
+      const liveDetectionService = LiveDetectionService.getInstance();
+      
+      // Use the profile photos from registration for live detection
+      const profilePhotosList = profilePhotos || formData?.photos || [];
+      
+      if (profilePhotosList.length === 0) {
+        Alert.alert(
+          'Photo Required',
+          'Please upload profile photos before proceeding with verification.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+       const liveDetectionResult = await liveDetectionService.performLiveDetection(photoUri, {
+         threshold: 0.45,
+         requireMinimumMatches: 2,
+         includeVerificationPhotos: false, // Don't include verification photos during registration
+         storedPhotos: profilePhotosList, // Pass photos directly to avoid backend call
+       });
+      
+      console.log('Live detection result:', liveDetectionResult);
+      
+      if (!liveDetectionResult.success || !liveDetectionResult.isMatch) {
+        Alert.alert(
+          'Live Detection Failed',
+          'We could not verify that this is the same person in your profile photos. Please ensure you are using the same lighting and facial expression.',
+          [{ text: 'Retake Selfie', onPress: retakeSelfie }]
+        );
+        return;
+      }
+
+      // Step 3: Estimate age using actual birth date
       console.log('Starting age estimation...');
       let calculatedAge: number | undefined;
       if (formData?.dateOfBirth) {
@@ -142,52 +180,24 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         }
       }
 
-      // Step 3: Face Matching
-      // Skipping server-side face comparison - using local AI verification instead
-      // Server-side comparison doesn't work with local file URLs (file://)
-      // Local AI verification (liveness detection, age estimation) is sufficient
-      console.log('Using local AI verification (liveness + age estimation)');
-      setProcessingStep('faceMatch');
-      
-      let verificationResult;
-      
-      // Skip server-side face comparison - use local AI verification
-      const idPhotoUri = idFrontImage || idBackImage || formData?.idDocument?.imageUri;
-      const profilePhotosList = profilePhotos || formData?.photos;
-      
-      // Use local AI verification only (liveness detection already passed above)
-      {
-        // Use local AI verification - liveness detection already passed
-        console.log('Using local AI verification (liveness + age)');
-        
-        // Liveness was already verified above, so we can trust this is a real person
-        verificationResult = {
-          success: true,
-          confidence: 0.95,
-          trustScore: 85,
-          ageEstimate: calculatedAge || 25,
-          isLikelyBot: false,
-          isDeepfake: false,
-          riskLevel: 'low' as const,
-          securityFlags: [],
-          recommendations: [],
-        };
-      }
+      // Step 4: Create final verification result
+      console.log('Creating final verification result...');
+      const verificationResult = {
+        success: true,
+        confidence: liveDetectionResult.similarity,
+        trustScore: Math.round(liveDetectionResult.confidence * 100),
+        ageEstimate: calculatedAge || 25,
+        isLikelyBot: false,
+        isDeepfake: false,
+        riskLevel: 'low' as const,
+        securityFlags: [],
+        recommendations: [],
+      };
 
       console.log('Verification result:', verificationResult);
       setVerificationResult(verificationResult);
 
-      if (!verificationResult.success) {
-        const errorMessage = (verificationResult as any).reasons?.join('\n') || 'Verification failed';
-        Alert.alert(
-          'Verification Failed',
-          errorMessage,
-          [{ text: 'Try Again', onPress: retakeSelfie }]
-        );
-        return;
-      }
-
-      // Step 3: Complete
+      // Step 5: Complete
       console.log('Verification successful, moving to success screen');
       setProcessingStep('complete');
       setTimeout(() => {
@@ -274,7 +284,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         </View>
         <Text style={styles.title}>Take a Selfie</Text>
         <Text style={styles.subtitle}>
-          We'll compare your selfie with your ID to verify it's really you.
+          We'll compare your selfie with your profile photos to verify it's really you and prevent catfishing.
         </Text>
       </View>
 

@@ -51,29 +51,35 @@ export interface VerificationResult {
 // Document field patterns for different document types
 const DOCUMENT_PATTERNS = {
   passport: {
-    documentNumber: /(?:PASSPORT|PASSPORT\s*NO|PP\s*NO|DOCUMENT\s*NO)[:\s]*([A-Z0-9]{6,9})/i,
-    name: /(?:NAME|SURNAME\s*AND\s*GIVEN\s*NAMES?|GIVEN\s*NAMES?)[:\s]*([A-Z]+(?:[\s-]+[A-Z]+)*)/i,
-    nationality: /(?:NATIONALITY|COUNTRY)[:\s]*([A-Z]+)/i,
-    dob: /(?:DATE\s*OF\s*BIRTH|DOB|D\.O\.B)[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION)[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-    gender: /(?:SEX|GENDER)[:\s]*([MF]|MALE|FEMALE)/i,
+    documentNumber: /(?:PASSPORT|PASSPORT\s*NO|PP\s*NO|DOCUMENT\s*NO)[:.\s]*([A-Z0-9]{6,9})/i,
+    surname: /(?:SURNAME)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
+    firstName: /(?:FIRST\s*NAME|GIVEN\s*NAMES?)[:.\s]*([A-Za-z]+)/i,
+    name: /(?:NAME|SURNAME\s*AND\s*GIVEN\s*NAMES?|GIVEN\s*NAMES?)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
+    nationality: /(?:NATIONALITY|COUNTRY)[:.\s]*([A-Za-z]+)/i,
+    dob: /(?:DATE\s*OF\s*BIRTH|DOB|D\.O\.B)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    gender: /(?:SEX|GENDER)[:.\s]*([MF]|MALE|FEMALE)/i,
   },
   drivers_license: {
-    documentNumber: /(?:LICENSE\s*NO|LICENCE\s*NO|DL\s*NO|DRIVER'S?\s*LICENSE)[:\s]*([A-Z0-9]{5,15})/i,
-    name: /(?:NAME|SURNAME|FULL\s*NAME|LICENCE\s*HOLDER)[:\s]*([A-Z]+(?:[\s-]+[A-Z]+)*)/i,
-    dob: /(?:DATE\s*OF\s*BIRTH|DOB|D\.O\.B|DATE\s*OF\s*ISSUE)[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION\s*DATE)[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-    address: /(?:ADDRESS|ADD)[:\s]*([A-Z0-9\s,]+(?:,\s*[A-Z0-9\s,]+)*)/i,
-    restrictions: /(?:RESTRICTIONS|CONDITIONS)[:\s]*([A-Z]+)/i,
-    class: /(?:CLASS|CAT)[:\s]*([A-Z0-9]+)/i,
+    documentNumber: /(?:LICENSE\s*NO|LICENCE\s*NO|DL\s*NO|DRIVER'S?\s*LICENSE)[:.\s]*([A-Z0-9]{5,15})/i,
+    surname: /(?:SURNAME)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
+    firstName: /(?:FIRST\s*NAME|GIVEN\s*NAMES?)[:.\s]*([A-Za-z]+)/i,
+    name: /(?:NAME|SURNAME|FULL\s*NAME|LICENCE\s*HOLDER)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
+    dob: /(?:DATE\s*OF\s*BIRTH|DOB|D\.O\.B|DATE\s*OF\s*ISSUE)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION\s*DATE)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    address: /(?:ADDRESS|ADD)[:.\s]*([A-Za-z0-9\s,]+(?:,\s*[A-Za-z0-9\s,]+)*)/i,
+    restrictions: /(?:RESTRICTIONS|CONDITIONS)[:.\s]*([A-Za-z]+)/i,
+    class: /(?:CLASS|CAT)[:.\s]*([A-Z0-9]+)/i,
   },
   national_id: {
-    documentNumber: /(?:ID\s*NO|IDENTIFICATION\s*NO|NATIONAL\s*ID|NRIC)[:\s]*([A-Z0-9]{8,12})/i,
-    name: /(?:NAME|FULL\s*NAME|IC\s*HOLDER)[:\s]*([A-Z]+(?:[\s-]+[A-Z]+)*)/i,
-    dob: /(?:DATE\s*OF\s*BIRTH|DOB|D\.O\.B|BIRTH\s*DATE)[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL)[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-    nationality: /(?:NATIONALITY|COUNTRY)[:\s]*([A-Z]+)/i,
-    address: /(?:ADDRESS)[:\s]*([A-Z0-9\s,]+(?:,\s*[A-Z0-9\s,]+)*)/i,
+    documentNumber: /(?:ID\s*NO|IDENTIFICATION\s*NO|NATIONAL\s*ID|NRIC)[^A-Za-z]*([A-Z0-9-]+)/i,
+    firstName: /(?:FIRST\s*NAME|GIVEN\s*NAMES?)[^A-Za-z]*([A-Za-z]+)/i,
+    surname: /(?:SURNAME)[^A-Za-z]*([A-Za-z]+)/i,
+    name: /(?:NAME|FULL\s*NAME|IC\s*HOLDER)[^A-Za-z]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
+    dob: /(?:DATE\s*(?:O[FB]|OF)\s*BIRTH|DOB|D\.O\.B|BIRTH\s*DATE)[^0-9]*(\d{1,2}\D+\d{1,2}\D+\d{2,4})/i,
+    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL)[^0-9]*(\d{1,2}\D+\d{1,2}\D+\d{2,4})/i,
+    nationality: /(?:NATIONALITY|COUNTRY)[^A-Za-z]*([A-Za-z]+)/i,
+    address: /(?:ADDRESS)[^A-Za-z]*([A-Za-z0-9\s,]+(?:,\s*[A-Za-z0-9\s,]+)*)/i,
   },
 };
 
@@ -136,14 +142,14 @@ class DocumentVerificationService {
         
         switch (field) {
           case 'name':
-            // Try to parse name into first/last
-            const nameParts = value.split(/\s+/);
-            if (nameParts.length >= 2) {
-              extractedData.lastName = nameParts[0];
-              extractedData.firstName = nameParts.slice(1).join(' ');
-            } else {
-              extractedData.fullName = value;
-            }
+            // Store full name - let backend handle name order comparison
+            extractedData.fullName = value;
+            break;
+          case 'firstName':
+            extractedData.firstName = value;
+            break;
+          case 'lastName':
+            extractedData.lastName = value;
             break;
           case 'documentNumber':
             extractedData.documentNumber = value;
@@ -171,7 +177,8 @@ class DocumentVerificationService {
   }
 
   /**
-   * Normalize date string to ISO format
+   * Normalize date string to ISO format (YYYY-MM-DD)
+   * Avoids using new Date().toISOString() to prevent timezone issues
    */
   private normalizeDate(dateStr: string): string {
     for (const format of DATE_FORMATS) {
@@ -198,7 +205,8 @@ class DocumentVerificationService {
         }
 
         if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-          return new Date(year, month - 1, day).toISOString().split('T')[0];
+          // Format directly to avoid timezone issues with new Date().toISOString()
+          return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         }
       }
     }
@@ -354,34 +362,55 @@ class DocumentVerificationService {
       return { matches: true, confidence: 100, details: 'Exact name match' };
     }
 
-    // Check if first name matches
-    const extractedFirst = (extractedFirstName || extracted.split(' ')[0] || '').toLowerCase();
-    const userFirst = (userFirstName || '').toLowerCase();
-    const extractedLast = (extractedLastName || extracted.split(' ').slice(1).join(' ') || '').toLowerCase();
-    const userLast = (userLastName || '').toLowerCase();
+    // Normalize names for comparison
+    const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+    const normExtracted = normalize(extracted);
+    const normUser = normalize(userName);
 
-    let matches = false;
-    let confidence = 0;
-    let details = '';
-
-    if (extractedFirst === userFirst && extractedLast === userLast) {
-      matches = true;
-      confidence = 95;
-      details = 'First and last name match';
-    } else if (extractedFirst === userFirst || extractedLast === userLast) {
-      matches = true;
-      confidence = 70;
-      details = 'Partial name match';
-    } else if (extracted.includes(userFirst) || userName.includes(extractedFirst)) {
-      matches = true;
-      confidence = 60;
-      details = 'Name components overlap';
-    } else {
-      confidence = 20;
-      details = 'Name does not match';
+    if (normExtracted === normUser) {
+      return { matches: true, confidence: 95, details: 'Normalized name match' };
     }
 
-    return { matches, confidence, details };
+    // Try both name orderings since ID format may vary
+    const userFirst = (userFirstName || '').toLowerCase().trim();
+    const userLast = (userLastName || '').toLowerCase().trim();
+    const extractedFirst = (extractedFirstName || extracted.split(' ')[0] || '').toLowerCase();
+    const extractedLast = (extractedLastName || extracted.split(' ').slice(1).join(' ') || '').toLowerCase();
+
+    // Check first-last and last-first orderings
+    const directMatch = extractedFirst === userFirst && extractedLast === userLast;
+    const reverseMatch = extractedFirst === userLast && extractedLast === userFirst;
+    
+    // Check if all name parts are present (regardless of order)
+    const userParts = [userFirst, userLast].filter(p => p.length > 0);
+    const docParts = [extractedFirst, extractedLast].filter(p => p.length > 0);
+    let allUserPartsFound = false;
+    for (const up of userParts) {
+      let found = false;
+      for (const dp of docParts) {
+        const normUp = normalize(up);
+        const normDp = normalize(dp);
+        if (normDp.includes(normUp) || normUp.includes(normDp)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        allUserPartsFound = false;
+        break;
+      }
+      allUserPartsFound = true;
+    }
+
+    if (directMatch || reverseMatch) {
+      return { matches: true, confidence: 90, details: directMatch ? 'First and last name match' : 'Name order variation match' };
+    } else if (allUserPartsFound) {
+      return { matches: true, confidence: 80, details: 'All name components found' };
+    } else if (extracted.includes(userFirst) || userName.includes(extractedFirst)) {
+      return { matches: true, confidence: 60, details: 'Name components overlap' };
+    }
+
+    return { matches: false, confidence: 20, details: 'Name does not match' };
   }
 
   /**

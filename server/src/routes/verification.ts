@@ -15,12 +15,14 @@ import { Canvas, Image, loadImage } from 'canvas';
 import * as faceapi from 'face-api.js';
 
 // Fix for face-api.js in Node.js environment
-// @ts-ignore - face-api.js types can be incomplete in Node.js
-// Use global fetch (available in Node.js 18+)
-faceapi.env.setEnv({ 
-  Canvas, 
-  Image, 
+faceapi.env.setEnv({
+  // @ts-ignore - These types have compatibility issues
+  Canvas: typeof Canvas !== 'undefined' ? Canvas : globalThis.Canvas,
+  // @ts-ignore
+  Image: typeof Image !== 'undefined' ? Image : globalThis.Image,
   fetch: globalThis.fetch,
+  // @ts-ignore - File system operations
+  readFile: fs.readFileSync,
 });
 
 // Configure face-api.js models path
@@ -28,8 +30,13 @@ const MODEL_PATH = path.join(process.cwd(), 'models');
 
 // Load face-api.js models from CDN or local
 let modelsLoaded = false;
+let modelsLoadError: Error | null = null;
 async function loadFaceApiModels() {
   if (modelsLoaded) return;
+  if (modelsLoadError) {
+    console.log('Previous model load error, skipping:', modelsLoadError.message);
+    return;
+  }
   try {
     // Try to load from local first
     try {
@@ -40,7 +47,7 @@ async function loadFaceApiModels() {
       console.log('Face-api.js models loaded from local disk');
       return;
     } catch (localError) {
-      console.log('Local models not found, downloading from CDN...');
+      console.log('Local models not found, trying CDN...');
     }
     
     // Fallback: Download models from justadudewhokeys CDN
@@ -56,9 +63,10 @@ async function loadFaceApiModels() {
     
     modelsLoaded = true;
     console.log('Face-api.js models loaded from CDN');
-  } catch (error) {
-    console.error('Error loading face-api.js models:', error);
-    throw error;
+  } catch (error: any) {
+    console.error('Error loading face-api.js models:', error?.message || error);
+    modelsLoadError = error;
+    throw new Error('Failed to load face-api.js models: ' + error?.message);
   }
 }
 
@@ -116,6 +124,18 @@ interface ExtractedDocumentData {
   gender?: string;
   address?: string;
 }
+
+const normalizeNameForMatch = (value: string) => {
+  if (!value) return '';
+  // Remove special characters and normalize whitespace for flexible matching
+  return value.trim().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').toLowerCase();
+};
+
+const normalizeDateForMatch = (value: string) => {
+  const parsed = new Date(value);
+  if (isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().split('T')[0];
+};
 
 // In-memory store for extracted document data (in production, use Redis or database)
 const documentDataStore = new Map<string, ExtractedDocumentData>();
@@ -505,6 +525,9 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       lastName,
       fullName,
       dateOfBirth,
+      registrationFirstName,
+      registrationLastName,
+      registrationDateOfBirth,
       expiryDate,
       nationality,
       gender,
@@ -513,6 +536,15 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       email,
       password
     } = req.body;
+
+    // For registration flow - lookup user by email if provided
+    let regUser = null;
+    if (email) {
+      regUser = await prisma.user.findUnique({
+        where: { email },
+        select: { dateOfBirth: true }
+      });
+    }
     
     // If user is authenticated, get their data for comparison
     let user: { firstName: string; lastName: string; dateOfBirth: Date | null; email: string } | null = null;
@@ -543,6 +575,15 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       errors.push('Date of birth is required');
     }
 
+    const extractedName = `${firstName || ''} ${lastName || ''}`.trim() || (fullName || '').trim();
+    if (!extractedName) {
+      errors.push('Could not extract full name from document');
+    }
+
+    if (!dateOfBirth || !normalizeDateForMatch(dateOfBirth)) {
+      errors.push('Could not extract a valid date of birth from document');
+    }
+
     // Verify age is 18+
     const dob = new Date(dateOfBirth);
     const today = new Date();
@@ -555,7 +596,7 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       errors.push('User must be at least 18 years old');
     }
 
-    // Check name matches (only if user exists - for logged in users)
+    // Check name matches (authenticated flow)
     let nameMatches = true;
     if (user) {
       // Normalize names for comparison - remove extra whitespace, convert to lowercase
@@ -612,6 +653,53 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
 
       if (!nameMatches) {
         errors.push('Name on document does not match registration data');
+      }
+
+      // Cross-check DOB with registration data (allow 1-day tolerance for OCR errors)
+      const dobToCheck = regUser || user;
+      if (dobToCheck && dateOfBirth && dobToCheck.dateOfBirth) {
+        const userDob = dobToCheck.dateOfBirth;
+        const inputDob = new Date(dateOfBirth);
+        const diffDays = Math.abs((userDob.getTime() - inputDob.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays > 1) {
+          errors.push('Date of birth does not match your registration information');
+        }
+      }
+
+    }
+
+    // Strict registration flow checks: both full name and DOB must match exactly
+    // with the user-entered values before continuing.
+    if (registrationFirstName || registrationLastName || registrationDateOfBirth) {
+      // Flexible name matching: check both orderings since ID format may vary
+      const regFirst = (registrationFirstName || '').toLowerCase().trim();
+      const regLast = (registrationLastName || '').toLowerCase().trim();
+      const docFirst = (firstName || '').toLowerCase().trim();
+      const docLast = (lastName || '').toLowerCase().trim();
+      const docFull = normalizeNameForMatch(fullName || extractedName);
+
+      const normRegFull = normalizeNameForMatch(`${regFirst} ${regLast}`);
+      const directMatch = docFull === normRegFull ||
+        (normalizeNameForMatch(docFirst) === normalizeNameForMatch(regFirst) &&
+         normalizeNameForMatch(docLast) === normalizeNameForMatch(regLast));
+      const reverseMatch = docFull.includes(normalizeNameForMatch(regLast)) &&
+        docFull.includes(normalizeNameForMatch(regFirst));
+
+      if (!directMatch && !reverseMatch && normRegFull && docFull) {
+        errors.push('Full name does not match the ID document');
+      }
+
+      // Date comparison with tolerance for formatting differences
+      const normalizedExtractedDob = normalizeDateForMatch(dateOfBirth || '');
+      const normalizedEnteredDob = normalizeDateForMatch(registrationDateOfBirth || '');
+      // Allow slight differences (1 day tolerance) for timezone/format issues
+      if (normalizedEnteredDob && normalizedExtractedDob && normalizedExtractedDob !== normalizedEnteredDob) {
+        const dob1 = new Date(normalizedExtractedDob);
+        const dob2 = new Date(normalizedEnteredDob);
+        const diffDays = Math.abs((dob1.getTime() - dob2.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays > 1) {
+          errors.push('Date of birth does not match the ID document');
+        }
       }
     }
 
@@ -785,8 +873,12 @@ router.get('/document/status', authMiddleware, async (req: AuthRequest, res: Res
 // Free solution - no external API needed
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/face-compare', async (req: AuthRequest, res: Response) => {
+  let errorDetails = '';
   try {
     const { image1, image2 } = req.body;
+    console.log('Face compare request received');
+    console.log('Image1:', image1?.substring(0, 50), image1?.length);
+    console.log('Image2:', image2?.substring(0, 50), image2?.length);
 
     if (!image1 || !image2) {
       return res.status(400).json({ 
@@ -796,35 +888,51 @@ router.post('/face-compare', async (req: AuthRequest, res: Response) => {
     }
 
     // Load models if not already loaded
+    console.log('Loading face-api models...');
     await loadFaceApiModels();
+    console.log('Models loaded, proceeding with comparison');
 
     // Load images from URLs or base64 - use canvas for Node.js
     let img1: Canvas;
     let img2: Canvas;
 
     try {
-      // Helper to load image into canvas
+      // Helper to load image into canvas using sharp for better compatibility
       const loadImageToCanvas = async (source: string): Promise<Canvas> => {
-        let imageData: Buffer;
+        let imageBuffer: Buffer;
         
         if (source.startsWith('data:image')) {
           // Base64 - extract the data part
           const base64Data = source.replace(/^data:image\/\w+;base64,/, '');
-          imageData = Buffer.from(base64Data, 'base64');
+          imageBuffer = Buffer.from(base64Data, 'base64');
         } else if (source.startsWith('http')) {
           // Fetch from URL
           const axios = require('axios');
-          const response = await axios.get(source, { responseType: 'arraybuffer' });
-          imageData = Buffer.from(response.data);
+          const response = await axios.get(source, { 
+            responseType: 'arraybuffer',
+            timeout: 10000,
+            maxContentLength: 10 * 1024 * 1024 // 10MB limit
+          });
+          imageBuffer = Buffer.from(response.data);
+        } else if (source.startsWith('file://') || source.startsWith('/')) {
+          // Local file path - handle file:// URIs or direct paths
+          const filePath = source.replace(/^file:\/\//, '');
+          if (fs.existsSync(filePath)) {
+            imageBuffer = fs.readFileSync(filePath);
+          } else {
+            throw new Error(`File not found: ${filePath}`);
+          }
         } else {
-          // Local file path
-          imageData = fs.readFileSync(source);
+          throw new Error(`Unsupported image source: ${source.substring(0, 50)}`);
         }
         
-        // Create canvas and draw image
-        const img = await loadImage(imageData);
-        const canvas = new Canvas(img.width, img.height);
+        // Use sharp to get image metadata and create canvas
+        const metadata = await sharp(imageBuffer).metadata();
+        const canvas = new Canvas(metadata.width, metadata.height);
         const ctx = canvas.getContext('2d');
+        
+        // Load image using canvas's loadImage
+        const img = await loadImage(imageBuffer);
         ctx.drawImage(img, 0, 0);
         return canvas;
       };
@@ -840,18 +948,31 @@ router.post('/face-compare', async (req: AuthRequest, res: Response) => {
     }
 
     // Detect faces and get descriptors
+    console.log('Creating face detector...');
     const detector = new faceapi.TinyFaceDetectorOptions({
       inputSize: 416,
       scoreThreshold: 0.5
     });
+    console.log('Detector created, detecting faces...');
 
-    const detection1 = await faceapi.detectSingleFace(img1, detector)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-
-    const detection2 = await faceapi.detectSingleFace(img2, detector)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
+    let detection1: any;
+    let detection2: any;
+    try {
+      detection1 = await faceapi.detectSingleFace(img1, detector)
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+      console.log('Face 1 detected:', !!detection1);
+      detection2 = await faceapi.detectSingleFace(img2, detector)
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+      console.log('Face 2 detected:', !!detection2);
+    } catch (faceError: any) {
+      console.error('Face detection error:', faceError);
+      return res.status(500).json({
+        error: 'Face detection failed',
+        details: faceError.message
+      });
+    }
 
     if (!detection1 || !detection2) {
       return res.json({
@@ -890,9 +1011,11 @@ router.post('/face-compare', async (req: AuthRequest, res: Response) => {
 
   } catch (error: any) {
     console.error('Face comparison error:', error);
+    console.error('Stack:', error?.stack);
     return res.status(500).json({ 
       error: 'Face comparison failed',
-      details: error.message
+      details: error?.message || String(error),
+      stack: error?.stack?.substring(0, 500)
     });
   }
 });
