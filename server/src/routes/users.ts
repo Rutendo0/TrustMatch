@@ -225,9 +225,14 @@ router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Re
     const currentUser = await prisma.user.findUnique({ where: { id: userId } });
     if (!currentUser) throw new AppError('User not found', 404);
 
+    // Get users the current user has already interacted with
+    // Only exclude LIKED users and matches - allow re-showing DISLIKED users
     const [swipedUsers, myBlocks, blockedByOthers] = await Promise.all([
       prisma.swipe.findMany({
-        where: { swiperId: userId },
+        where: { 
+          swiperId: userId,
+          action: { in: ['LIKE', 'SUPERLIKE'] }  // Only exclude liked users, not disliked
+        },
         select: { swipedId: true },
       }),
       prisma.userBlock.findMany({
@@ -310,13 +315,182 @@ router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Re
   }
 });
 
+// ── GET /api/users/me/insights ─────────────────────────────────────────────────
+// MUST be before /:userId so Express doesn't treat "me" as a userId param
+router.get('/me/insights', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    
+    const likesReceived = await prisma.swipe.count({
+      where: { swipedId: userId, action: 'LIKE' },
+    });
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const likesReceivedLastWeek = await prisma.swipe.count({
+      where: { swipedId: userId, action: 'LIKE', createdAt: { gte: sevenDaysAgo } },
+    });
+
+    const superLikesReceived = await prisma.swipe.count({
+      where: { swipedId: userId, action: 'SUPERLIKE' },
+    });
+
+    const totalMatches = await prisma.match.count({
+      where: {
+        OR: [{ user1Id: userId }, { user2Id: userId }],
+        isActive: true,
+      },
+    });
+
+    const profileViews = await prisma.swipe.count({
+      where: { swipedId: userId },
+    });
+
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    const likesPreviousWeek = await prisma.swipe.count({
+      where: {
+        swipedId: userId,
+        action: 'LIKE',
+        createdAt: { gte: fourteenDaysAgo, lt: sevenDaysAgo },
+      },
+    });
+
+    let likesTrend = 0;
+    if (likesPreviousWeek > 0) {
+      likesTrend = Math.round(((likesReceivedLastWeek - likesPreviousWeek) / likesPreviousWeek) * 100);
+    } else if (likesReceivedLastWeek > 0) {
+      likesTrend = 100;
+    }
+
+    return res.json({
+      totalLikesReceived: likesReceived,
+      likesReceivedLastWeek,
+      likesTrend,
+      superLikesReceived,
+      totalMatches,
+      profileViews,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Get insights error:', error);
+    return res.status(500).json({ error: 'Failed to get profile insights' });
+  }
+});
+
+// ── POST /api/users/me/live-verification ─────────────────────────────────────
+router.post('/me/live-verification', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { similarity, confidence, isMatch, photosMatched, totalPhotos } = req.body;
+
+    if (typeof similarity !== 'number' || typeof confidence !== 'number' || typeof isMatch !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid verification data' });
+    }
+
+    const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+    const deviceInfo = req.get('User-Agent') || 'unknown';
+
+    let verification = await prisma.verification.findUnique({ where: { userId } });
+    if (!verification) {
+      verification = await prisma.verification.create({ data: { userId } });
+    }
+
+    const liveVerification = await prisma.liveVerification.create({
+      data: {
+        verificationId: verification.id,
+        similarity,
+        confidence,
+        isMatch,
+        photosMatched: photosMatched || 0,
+        totalPhotos: totalPhotos || 0,
+        ipAddress,
+        deviceInfo,
+      },
+    });
+
+    if (isMatch) {
+      await prisma.verification.update({
+        where: { id: verification.id },
+        data: {
+          liveVerified: true,
+          lastLiveVerification: new Date(),
+          liveVerificationCount: (verification.liveVerificationCount || 0) + 1,
+          isVerified: true,
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      liveVerification: {
+        id: liveVerification.id,
+        isMatch,
+        similarity,
+        confidence,
+        photosMatched,
+        totalPhotos,
+        createdAt: liveVerification.createdAt,
+      },
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Live verification error:', error);
+    return res.status(500).json({ error: 'Failed to process live verification' });
+  }
+});
+
+// ── GET /api/users/me/live-verification/history ───────────────────────────────
+router.get('/me/live-verification/history', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { limit = 10, offset = 0 } = req.query;
+
+    const [history, total] = await Promise.all([
+      prisma.liveVerification.findMany({
+        where: { verification: { userId } },
+        orderBy: { createdAt: 'desc' },
+        take: Number(limit),
+        skip: Number(offset),
+      }),
+      prisma.liveVerification.count({
+        where: { verification: { userId } },
+      }),
+    ]);
+
+    return res.json({
+      history: history.map(r => ({
+        id: r.id,
+        isMatch: r.isMatch,
+        similarity: r.similarity,
+        confidence: r.confidence,
+        photosMatched: r.photosMatched,
+        totalPhotos: r.totalPhotos,
+        createdAt: r.createdAt,
+      })),
+      total,
+      hasMore: Number(offset) + Number(limit) < total,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Live verification history error:', error);
+    return res.status(500).json({ error: 'Failed to get live verification history' });
+  }
+});
+
 // ── GET /api/users/:userId — public profile ───────────────────────────────────
+// MUST be last — wildcard catches everything above if placed earlier
 router.get('/:userId', async (req: AuthRequest, res: Response) => {
   try {
     const requesterId = req.userId!;
     const { userId } = req.params;
 
-    // Hide profile if any block exists in either direction
     const block = await prisma.userBlock.findFirst({
       where: {
         OR: [
@@ -376,214 +550,5 @@ function calculateAge(dateOfBirth: Date): number {
   }
   return age;
 }
-
-// ── GET /api/users/me/insights ─────────────────────────────────────────────────
-router.get('/me/insights', async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId!;
-    
-    // Get total likes received (count of people who liked this user)
-    const likesReceived = await prisma.swipe.count({
-      where: {
-        swipedId: userId,
-        action: 'LIKE',
-      },
-    });
-
-    // Get likes received in the last 7 days
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const likesReceivedLastWeek = await prisma.swipe.count({
-      where: {
-        swipedId: userId,
-        action: 'LIKE',
-        createdAt: { gte: sevenDaysAgo },
-      },
-    });
-
-    // Get super likes received
-    const superLikesReceived = await prisma.swipe.count({
-      where: {
-        swipedId: userId,
-        action: 'SUPERLIKE',
-      },
-    });
-
-    // Get total matches
-    const totalMatches = await prisma.match.count({
-      where: {
-        OR: [
-          { user1Id: userId },
-          { user2Id: userId },
-        ],
-        isActive: true,
-      },
-    });
-
-    // Get profile views (approximated by total swipes on this user's profile)
-    const profileViews = await prisma.swipe.count({
-      where: {
-        swipedId: userId,
-      },
-    });
-
-    // Calculate trends (comparing last 7 days to previous 7 days)
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    const likesPreviousWeek = await prisma.swipe.count({
-      where: {
-        swipedId: userId,
-        action: 'LIKE',
-        createdAt: { gte: fourteenDaysAgo, lt: sevenDaysAgo },
-      },
-    });
-
-    let likesTrend = 0;
-    if (likesPreviousWeek > 0) {
-      likesTrend = Math.round(((likesReceivedLastWeek - likesPreviousWeek) / likesPreviousWeek) * 100);
-    } else if (likesReceivedLastWeek > 0) {
-      likesTrend = 100;
-    }
-
-    return res.json({
-      totalLikesReceived: likesReceived,
-      likesReceivedLastWeek,
-      likesTrend,
-      superLikesReceived,
-      totalMatches,
-      profileViews,
-    });
-  } catch (error) {
-    if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-    console.error('Get insights error:', error);
-    return res.status(500).json({ error: 'Failed to get profile insights' });
-  }
-});
-
-// ── POST /api/users/me/live-verification ────────────────────────────────────────
-router.post('/me/live-verification', async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const { similarity, confidence, isMatch, photosMatched, totalPhotos } = req.body;
-
-    if (typeof similarity !== 'number' || typeof confidence !== 'number' || typeof isMatch !== 'boolean') {
-      return res.status(400).json({ error: 'Invalid verification data' });
-    }
-
-    // Get client IP and device info
-    const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
-    const deviceInfo = req.get('User-Agent') || 'unknown';
-
-    // Get or create verification record
-    let verification = await prisma.verification.findUnique({
-      where: { userId },
-    });
-
-    if (!verification) {
-      verification = await prisma.verification.create({
-        data: {
-          userId,
-        },
-      });
-    }
-
-    // Create live verification record
-    const liveVerification = await prisma.liveVerification.create({
-      data: {
-        verificationId: verification.id,
-        similarity,
-        confidence,
-        isMatch,
-        photosMatched: photosMatched || 0,
-        totalPhotos: totalPhotos || 0,
-        ipAddress,
-        deviceInfo,
-      },
-    });
-
-    // Update user's verification status if successful
-    if (isMatch) {
-      const newVerificationCount = (verification.liveVerificationCount || 0) + 1;
-      
-      await prisma.verification.update({
-        where: { id: verification.id },
-        data: {
-          liveVerified: true,
-          lastLiveVerification: new Date(),
-          liveVerificationCount: newVerificationCount,
-          isVerified: true, // Mark as fully verified if live verification passes
-        },
-      });
-    }
-
-    return res.json({
-      success: true,
-      liveVerification: {
-        id: liveVerification.id,
-        isMatch,
-        similarity,
-        confidence,
-        photosMatched,
-        totalPhotos,
-        createdAt: liveVerification.createdAt,
-      },
-    });
-  } catch (error) {
-    if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-    console.error('Live verification error:', error);
-    return res.status(500).json({ error: 'Failed to process live verification' });
-  }
-});
-
-// ── GET /api/users/me/live-verification/history ──────────────────────────────────
-router.get('/me/live-verification/history', async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const { limit = 10, offset = 0 } = req.query;
-
-    const history = await prisma.liveVerification.findMany({
-      where: {
-        verification: {
-          userId,
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: Number(limit),
-      skip: Number(offset),
-    });
-
-    const total = await prisma.liveVerification.count({
-      where: {
-        verification: {
-          userId,
-        },
-      },
-    });
-
-    return res.json({
-      history: history.map(record => ({
-        id: record.id,
-        isMatch: record.isMatch,
-        similarity: record.similarity,
-        confidence: record.confidence,
-        photosMatched: record.photosMatched,
-        totalPhotos: record.totalPhotos,
-        createdAt: record.createdAt,
-      })),
-      total,
-      hasMore: Number(offset) + Number(limit) < total,
-    });
-  } catch (error) {
-    if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-    console.error('Live verification history error:', error);
-    return res.status(500).json({ error: 'Failed to get live verification history' });
-  }
-});
 
 export default router;

@@ -6,19 +6,24 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
+  TextInput,
+  Alert,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
 import * as SecureStore from 'expo-secure-store';
+import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Card, Button } from '../../components/common';
+import { Card, Button, AgeRangeInput } from '../../components/common';
 import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+import { useTheme } from '../../context/ThemeContext';
 import { normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 
 interface FilterState {
   ageRange: [number, number];
-  maxDistance: number;
+  currentCity: string;
+  additionalCity1: string;
+  additionalCity2: string;
   showVerifiedOnly: boolean;
   showWithPhotos: boolean;
   showOnlineOnly: boolean;
@@ -57,9 +62,12 @@ const AVAILABLE_INTERESTS = [
 ];
 
 export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { colors } = useTheme();
   const [filters, setFilters] = useState<FilterState>({
     ageRange: [21, 50],
-    maxDistance: 25,
+    currentCity: '',
+    additionalCity1: '',
+    additionalCity2: '',
     showVerifiedOnly: true,
     showWithPhotos: true,
     showOnlineOnly: false,
@@ -99,8 +107,10 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   const resetFilters = () => {
     setFilters({
-      ageRange: [21, 50],
-      maxDistance: 50,
+      ageRange: [18, 50],
+      currentCity: '',
+      additionalCity1: '',
+      additionalCity2: '',
       showVerifiedOnly: false,
       showWithPhotos: false,
       showOnlineOnly: false,
@@ -128,18 +138,14 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       // Get age range - check both nested preferences and top-level fields
       const ageMin = profile.preferences?.ageRangeMin ?? profile.ageRangeMin ?? 21;
       const ageMax = profile.preferences?.ageRangeMax ?? profile.ageRangeMax ?? 50;
-      const distance = profile.preferences?.maxDistance ?? profile.maxDistance ?? 25;
 
       // Set showMe based on saved preference or user's gender
       let defaultShowMe: 'Men' | 'Women';
       if (profile.preferences?.interestedIn) {
-        // Use saved preference - convert MALE/FEMALE to Men/Women
         defaultShowMe = profile.preferences.interestedIn === 'MALE' ? 'Men' : 'Women';
       } else if (profile.gender) {
-        // Auto-select opposite gender based on user's gender
         defaultShowMe = profile.gender === 'FEMALE' ? 'Men' : 'Women';
       } else {
-        // Default fallback
         defaultShowMe = 'Men';
       }
 
@@ -158,7 +164,9 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         ...prev,
         ...storedFilters,
         ageRange: [ageMin, ageMax],
-        maxDistance: distance,
+        currentCity: storedFilters.currentCity ?? profile.city ?? '',
+        additionalCity1: storedFilters.additionalCity1 ?? '',
+        additionalCity2: storedFilters.additionalCity2 ?? '',
         showMe: defaultShowMe,
         interests: Array.isArray(storedFilters.interests)
           ? storedFilters.interests
@@ -177,29 +185,41 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   };
 
   const applyFilters = async () => {
+    if (!filters.currentCity.trim()) {
+      Alert.alert('City Required', 'Please enter your current city to find matches.');
+      return;
+    }
+
     try {
-      // Convert 'Men'/'Women' to 'MALE'/'FEMALE' for backend
-      const interestedInMap: Record<string, string> = {
-        'Men': 'MALE',
-        'Women': 'FEMALE',
-      };
-      
-      // Save preferences to server
+      // Derive interestedIn from the user's own gender (set during registration)
+      let interestedIn = 'MALE';
+      try {
+        const profile = await api.getProfile();
+        interestedIn = profile.gender === 'FEMALE' ? 'MALE' : 'FEMALE';
+      } catch (e) {
+        console.warn('Could not fetch user gender for preferences');
+      }
+
+      // Save age range and gender preference to server
       await api.updatePreferences({
         ageRangeMin: filters.ageRange[0],
         ageRangeMax: filters.ageRange[1],
-        maxDistance: filters.maxDistance,
-        interestedIn: interestedInMap[filters.showMe],
+        interestedIn,
       });
 
-      // Persist filter-specific fields that are not part of /users/preferences.
+      // Save current city to profile
       await api.updateProfile({
+        city: filters.currentCity.trim(),
         interests: filters.interests,
       });
 
+      // Persist all filter fields locally
       await SecureStore.setItemAsync(
         FILTER_PREFERENCES_KEY,
         JSON.stringify({
+          currentCity: filters.currentCity.trim(),
+          additionalCity1: filters.additionalCity1.trim(),
+          additionalCity2: filters.additionalCity2.trim(),
           showVerifiedOnly: filters.showVerifiedOnly,
           showWithPhotos: filters.showWithPhotos,
           showOnlineOnly: filters.showOnlineOnly,
@@ -218,7 +238,7 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -241,62 +261,61 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         <Card style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Discovery Preferences</Text>
           
-          <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Show Me</Text>
-            <View style={styles.segmentControl}>
-              {(['Men', 'Women'] as const).map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={[
-                    styles.segmentButton,
-                    filters.showMe === option && styles.segmentButtonActive
-                  ]}
-                  onPress={() => updateFilter('showMe', option)}
-                >
-                  <Text style={[
-                    styles.segmentText,
-                    filters.showMe === option && styles.segmentTextActive
-                  ]}>
-                    {option}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          <View style={[styles.settingRow, { flexDirection: 'column', alignItems: 'flex-start' }]}>
+            <Text style={[styles.settingLabel, { marginBottom: SPACING.md }]}>Age Range</Text>
+            <AgeRangeInput
+              minAge={filters.ageRange[0]}
+              maxAge={filters.ageRange[1]}
+              onMinChange={(val) => updateFilter('ageRange', [val, filters.ageRange[1]])}
+              onMaxChange={(val) => updateFilter('ageRange', [filters.ageRange[0], val])}
+              minLimit={18}
+            />
+            <Text style={styles.ageHint}>Minimum age is 18 years</Text>
           </View>
 
           <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Age Range</Text>
-            <View style={styles.ageRangeContainer}>
-              <Text style={styles.ageRangeText}>
-                {filters.ageRange[0]} - {filters.ageRange[1]}
+            <View style={styles.locationSection}>
+              <Text style={styles.settingLabel}>Location Matching</Text>
+              <Text style={styles.locationSubtext}>
+                Enter cities you want to match with. Your current city is required.
               </Text>
-              <Slider
-                style={styles.ageSlider}
-                minimumValue={18}
-                maximumValue={99}
-                value={filters.ageRange[1]}
-                onValueChange={(value: number) => updateFilter('ageRange', [filters.ageRange[0], Math.round(value)])}
-                minimumTrackTintColor={COLORS.primary}
-                maximumTrackTintColor={COLORS.border}
-                thumbTintColor={COLORS.primary}
-              />
-            </View>
-          </View>
 
-          <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Maximum Distance</Text>
-            <View style={styles.distanceContainer}>
-              <Text style={styles.distanceText}>{filters.maxDistance} km</Text>
-              <Slider
-                style={styles.distanceSlider}
-                minimumValue={1}
-                maximumValue={100}
-                value={filters.maxDistance}
-                onValueChange={(value: number) => updateFilter('maxDistance', Math.round(value))}
-                minimumTrackTintColor={COLORS.primary}
-                maximumTrackTintColor={COLORS.border}
-                thumbTintColor={COLORS.primary}
-              />
+              <View style={styles.cityInputGroup}>
+                <Text style={styles.cityInputLabel}>📍 Your Current City *</Text>
+                <TextInput
+                  style={styles.cityInput}
+                  placeholder="e.g. Harare"
+                  value={filters.currentCity}
+                  onChangeText={(text) => updateFilter('currentCity', text)}
+                  autoCapitalize="words"
+                />
+              </View>
+
+              <View style={styles.cityInputGroup}>
+                <Text style={styles.cityInputLabel}>🏙️ Additional City 1</Text>
+                <TextInput
+                  style={styles.cityInput}
+                  placeholder="e.g. Bulawayo"
+                  value={filters.additionalCity1}
+                  onChangeText={(text) => updateFilter('additionalCity1', text)}
+                  autoCapitalize="words"
+                />
+              </View>
+
+              <View style={styles.cityInputGroup}>
+                <Text style={styles.cityInputLabel}>🏙️ Additional City 2</Text>
+                <TextInput
+                  style={styles.cityInput}
+                  placeholder="e.g. Mutare"
+                  value={filters.additionalCity2}
+                  onChangeText={(text) => updateFilter('additionalCity2', text)}
+                  autoCapitalize="words"
+                />
+              </View>
+
+              <Text style={styles.locationHint}>
+                You'll be matched with people in any of these cities.
+              </Text>
             </View>
           </View>
         </Card>
@@ -521,30 +540,6 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: SPACING.md,
   },
-  ageRangeText: {
-    fontSize: normalize(FONTS.sizes.sm),
-    color: COLORS.primary,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: SPACING.xs,
-  },
-  ageSlider: {
-    width: '100%',
-  },
-  distanceContainer: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  distanceText: {
-    fontSize: normalize(FONTS.sizes.sm),
-    color: COLORS.primary,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: SPACING.xs,
-  },
-  distanceSlider: {
-    width: '100%',
-  },
   trustScoreContainer: {
     flex: 1,
     marginLeft: SPACING.md,
@@ -622,5 +617,46 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: SPACING.xl,
+  },
+  locationSection: {
+    flex: 1,
+    paddingVertical: SPACING.md,
+  },
+  locationSubtext: {
+    fontSize: normalize(FONTS.sizes.sm),
+    color: COLORS.textSecondary,
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.md,
+  },
+  cityInputGroup: {
+    marginBottom: SPACING.md,
+  },
+  cityInputLabel: {
+    fontSize: normalize(FONTS.sizes.sm),
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  cityInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    fontSize: normalize(FONTS.sizes.md),
+    backgroundColor: COLORS.white,
+    color: COLORS.text,
+  },
+  locationHint: {
+    fontSize: normalize(FONTS.sizes.xs),
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
+    marginTop: SPACING.xs,
+  },
+  ageHint: {
+    fontSize: normalize(FONTS.sizes.xs),
+    color: COLORS.textSecondary,
+    marginTop: SPACING.sm,
+    fontStyle: 'italic',
   },
 });

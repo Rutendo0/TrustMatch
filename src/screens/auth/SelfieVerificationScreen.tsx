@@ -40,6 +40,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [processingStep, setProcessingStep] = useState<'liveness' | 'faceMatch' | 'complete'>('liveness');
   const cameraRef = useRef<CameraView>(null);
+  const verificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const instructions = [
     { icon: '💡', text: 'Find good lighting - natural light works best' },
@@ -93,7 +94,16 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
 
   const performAIVerificationWithPhoto = async (photoUri: string) => {
     console.log('Starting AI verification with photo URI:', photoUri);
-    
+
+    // 60-second hard timeout — if verification hangs, give user a way out
+    verificationTimeoutRef.current = setTimeout(() => {
+      Alert.alert(
+        'Verification Taking Too Long',
+        'The verification server is not responding. Please check your connection and try again.',
+        [{ text: 'Try Again', onPress: retakeSelfie }]
+      );
+    }, 60000);
+
     try {
       const aiService = AISecurityService.getInstance();
       
@@ -131,9 +141,9 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
       
        const liveDetectionResult = await liveDetectionService.performLiveDetection(photoUri, {
          threshold: 0.45,
-         requireMinimumMatches: 2,
-         includeVerificationPhotos: false, // Don't include verification photos during registration
-         storedPhotos: profilePhotosList, // Pass photos directly to avoid backend call
+         requireMinimumMatches: 1,
+         includeVerificationPhotos: false,
+         storedPhotos: profilePhotosList,
        });
       
       console.log('Live detection result:', liveDetectionResult);
@@ -147,34 +157,41 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         return;
       }
 
-      // Step 3: Estimate age using actual birth date
+      // Step 3: Calculate age from birth date
       console.log('Starting age estimation...');
       let calculatedAge: number | undefined;
       if (formData?.dateOfBirth) {
         try {
-          // Parse DD/MM/YYYY format properly
-          const dateParts = formData.dateOfBirth.split('/');
-          if (dateParts.length === 3) {
-            const day = parseInt(dateParts[0], 10);
-            const month = parseInt(dateParts[1], 10) - 1; // Month is 0-indexed
-            const year = parseInt(dateParts[2], 10);
-            
-            const birthDate = new Date(year, month, day);
-            
-            // Validate that the date components match
-            if (birthDate.getDate() === day && birthDate.getMonth() === month && birthDate.getFullYear() === year) {
-              const today = new Date();
-              let age = today.getFullYear() - birthDate.getFullYear();
-              const monthDiff = today.getMonth() - birthDate.getMonth();
-              if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-                age--;
-              }
-              calculatedAge = age;
-              console.log('Calculated age from birth date:', age, 'from date:', formData.dateOfBirth);
-            } else {
-              console.error('Invalid birth date format:', formData.dateOfBirth);
-            }
+          const raw: string = formData.dateOfBirth;
+          let day: number, month: number, year: number;
+
+          if (raw.includes('/')) {
+            // DD/MM/YYYY from DatePicker
+            const p = raw.split('/');
+            day   = parseInt(p[0], 10);
+            month = parseInt(p[1], 10) - 1;
+            year  = parseInt(p[2], 10);
+          } else if (raw.includes('-')) {
+            // YYYY-MM-DD from API / ProfileDetailsScreen
+            const p = raw.split('-');
+            year  = parseInt(p[0], 10);
+            month = parseInt(p[1], 10) - 1;
+            day   = parseInt(p[2], 10);
+          } else {
+            throw new Error(`Unrecognised date format: ${raw}`);
           }
+
+          const today = new Date();
+          let age = today.getFullYear() - year;
+          const monthDiff = today.getMonth() - month;
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < day)) {
+            age--;
+          }
+
+          if (age >= 0 && age <= 120) {
+            calculatedAge = age;
+          }
+          console.log('Calculated age:', calculatedAge, 'from date:', raw);
         } catch (error) {
           console.error('Error calculating age from birth date:', error);
         }
@@ -182,11 +199,24 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
 
       // Step 4: Create final verification result
       console.log('Creating final verification result...');
+
+      // Use the best matched photo's similarity for confidence, not the average
+      // across all photos (which gets dragged down by non-matching photos)
+      const bestSimilarity = liveDetectionResult.details.selfieWithProfiles
+        .reduce((best: number, p: any) => Math.max(best, p.similarity ?? 0), 0);
+      const matchedCount = liveDetectionResult.storedPhotosMatched;
+      const totalPhotos  = liveDetectionResult.totalStoredPhotos;
+
+      // Trust score: 50 base + up to 30 from best match quality + up to 20 from match ratio
+      const matchRatioBonus = Math.round((matchedCount / Math.max(totalPhotos, 1)) * 20);
+      const similarityBonus = Math.round(bestSimilarity * 30);
+      const trustScore = Math.min(100, 50 + similarityBonus + matchRatioBonus);
+
       const verificationResult = {
         success: true,
-        confidence: liveDetectionResult.similarity,
-        trustScore: Math.round(liveDetectionResult.confidence * 100),
-        ageEstimate: calculatedAge || 25,
+        confidence: bestSimilarity,
+        trustScore,
+        ageEstimate: calculatedAge ?? undefined,
         isLikelyBot: false,
         isDeepfake: false,
         riskLevel: 'low' as const,
@@ -200,11 +230,13 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
       // Step 5: Complete
       console.log('Verification successful, moving to success screen');
       setProcessingStep('complete');
+      if (verificationTimeoutRef.current) clearTimeout(verificationTimeoutRef.current);
       setTimeout(() => {
         setStep('success');
       }, 1000);
 
     } catch (error) {
+      if (verificationTimeoutRef.current) clearTimeout(verificationTimeoutRef.current);
       console.error('AI verification error:', error);
       Alert.alert(
         'Verification Error',
@@ -266,6 +298,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
 
   const retakeSelfie = () => {
     console.log('Retaking selfie, resetting state');
+    if (verificationTimeoutRef.current) clearTimeout(verificationTimeoutRef.current);
     setSelfieImage(null);
     setVerificationResult(null);
     setProcessingStep('liveness');

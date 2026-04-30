@@ -15,6 +15,14 @@ const IDENTITY_FP_PREFIX = 'identity:';
 
 const generateAccessToken = (userId: string): string => {
   const secret = process.env.JWT_SECRET!;
+  
+  if (!secret) {
+    console.error('JWT_SECRET is not defined in generateAccessToken!');
+    throw new Error('Server configuration error: JWT_SECRET not set');
+  }
+  
+  console.debug(`Generating access token with JWT_SECRET: ${secret.substring(0, 10)}...`);
+  
   const expiresIn = (process.env.JWT_EXPIRES_IN || '7d') as `${number}${'s' | 'm' | 'h' | 'd' | 'w' | 'y'}`;
   return jwt.sign({ userId }, secret, { expiresIn });
 };
@@ -36,7 +44,7 @@ router.post(
     body('password').isLength({ min: 8 }),
     body('firstName').notEmpty().trim(),
     body('lastName').notEmpty().trim(),
-    body('dateOfBirth').notEmpty().isISO8601(),
+    body('dateOfBirth').notEmpty().isString(),
     body('gender').isIn(['MALE', 'FEMALE']),
     body('deviceFingerprint').notEmpty(),
     body('identityFingerprint').optional().isString().trim().notEmpty(),
@@ -123,10 +131,10 @@ router.post(
             },
             token,
             refreshToken,
-            message: 'Login successful (existing user)',
+            message: 'Welcome back! Continuing your registration.',
           });
         } else {
-          throw new AppError('Email or phone already registered', 400);
+          return res.status(409).json({ message: "This email or phone number is already registered. Please log in with your password, or use 'Forgot Password' if you don't remember it." });
         }
       }
 
@@ -220,10 +228,19 @@ router.post(
       });
     } catch (error) {
       if (error instanceof AppError) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({ message: error.message });
       }
       console.error('Registration error:', error);
-      return res.status(500).json({ error: 'Registration failed' });
+
+      // Handle Prisma/DB specific errors with friendly messages
+      const errMsg = (error as any)?.message || '';
+      if (errMsg.includes('Unique constraint') || errMsg.includes('unique')) {
+        return res.status(409).json({ message: "This email or phone number is already registered. Please log in with your password, or use 'Forgot Password' if you don't remember it." });
+      }
+      if (errMsg.includes('enum')) {
+        return res.status(500).json({ message: 'Server configuration error. Please try again later.' });
+      }
+      return res.status(500).json({ message: 'Registration failed. Please try again.' });
     }
   }
 );
@@ -265,11 +282,13 @@ router.post(
         },
       });
 
-if (!user) throw new AppError('Invalid credentials', 401);
-      if (!user.isActive || user.status !== 'ACTIVE' || !user.verification?.isVerified) throw new AppError('Complete all verification steps before logging in', 403);
+if (!user) throw new AppError('Invalid email or password. Please try again.', 401);
+      if (!user.isActive) throw new AppError('Your account has been suspended. Please contact support.', 403);
+      if (user.status !== 'ACTIVE') throw new AppError('Please complete all verification steps before logging in.', 403);
+      if (!user.verification?.isVerified) throw new AppError('Please complete your identity verification before logging in.', 403);
 
       const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-      if (!isValidPassword) throw new AppError('Invalid credentials', 401);
+      if (!isValidPassword) throw new AppError('Invalid email or password. Please try again.', 401);
 
       await prisma.user.update({
         where: { id: user.id },
@@ -294,12 +313,11 @@ if (!user) throw new AppError('Invalid credentials', 401);
         refreshToken,
       });
     } catch (error) {
-      console.error('Registration error details:', error);
+      console.error('Login error:', error);
       if (error instanceof AppError) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({ message: error.message });
       }
-      console.error('Registration error:', error);
-      return res.status(500).json({ error: 'Registration failed' });
+      return res.status(500).json({ message: 'Login failed. Please try again.' });
     }
   }
 );

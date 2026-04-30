@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Input } from '../../components/common';
+import { registrationProgress } from '../../services/RegistrationProgressService';
 import { COLORS, FONTS, SPACING } from '../../constants/theme';
 
 type RegisterScreenProps = {
@@ -25,6 +26,14 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Clear any old registration progress when user starts fresh registration
+  useEffect(() => {
+    const clearOldProgress = async () => {
+      await registrationProgress.clearProgress();
+    };
+    clearOldProgress();
+  }, []);
 
   const validate = () => {
     const newErrors: Record<string, string> = {};

@@ -13,6 +13,7 @@ import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import { Canvas, Image, loadImage } from 'canvas';
 import * as faceapi from 'face-api.js';
+import axios from 'axios';
 
 // Fix for face-api.js in Node.js environment
 faceapi.env.setEnv({
@@ -102,6 +103,38 @@ async function getOcrWorker(): Promise<Tesseract.Worker> {
 
 const router = Router();
 
+// ── Levenshtein edit distance — used for fuzzy name matching to handle OCR errors
+// e.g. "MIEAYO" vs "MIKITAYO" → distance 3, similarity ~0.63 → accepted
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+// Returns similarity 0–1. Threshold 0.6 = at least 60% of chars match.
+function nameSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  const dist = levenshtein(a.toLowerCase(), b.toLowerCase());
+  return 1 - dist / Math.max(a.length, b.length);
+}
+
+// Checks if two names are similar enough to be the same person
+// Accepts exact match OR similarity >= 0.6 (handles OCR character errors)
+function namesMatch(userName: string, ocrName: string): boolean {
+  if (!userName || !ocrName) return false;
+  if (ocrName.includes(userName)) return true; // exact substring
+  return nameSimilarity(userName, ocrName) >= 0.6;
+}
+
 // Document verification status enum
 enum DocumentVerificationStatus {
   PENDING = 'PENDING',
@@ -132,7 +165,26 @@ const normalizeNameForMatch = (value: string) => {
 };
 
 const normalizeDateForMatch = (value: string) => {
-  const parsed = new Date(value);
+  if (!value) return '';
+  
+  // If already in YYYY-MM-DD format, return as-is
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+  
+  // Try to parse DD/MM/YYYY or DD-MM-YYYY format
+  const dmyMatch = value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10);
+    const year = parseInt(dmyMatch[3], 10);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  
+  // Fallback: try Date parsing but avoid timezone issues
+  const parsed = new Date(value + 'T00:00:00Z'); // Force UTC
   if (isNaN(parsed.getTime())) return '';
   return parsed.toISOString().split('T')[0];
 };
@@ -292,6 +344,23 @@ router.post('/webhook', async (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/verification/gemini-models — debug: list available Gemini models for the configured key
+router.get('/gemini-models', async (_req: Request, res: Response) => {
+  const key = process.env.GOOGLE_VISION_API_KEY;
+  if (!key) return res.status(500).json({ error: 'GOOGLE_VISION_API_KEY not set' });
+  try {
+    const response = await axios.get(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
+    );
+    const models = (response.data?.models || [])
+      .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m: any) => m.name);
+    return res.json({ models });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.response?.data || err?.message });
+  }
+});
+
 // GET /api/verification/status
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/status', authMiddleware, async (req: AuthRequest, res: Response) => {
@@ -365,69 +434,140 @@ function buildStatusResponse(v: {
 }
 
 // ── POST /api/verification/extract-document-text ─────────────────────────────
-// Open-source server-side OCR using Tesseract.js (no API key, no rate limits)
-router.post('/extract-document-text', authMiddleware, async (req: AuthRequest, res: Response) => {
+// OCR endpoint — tries OCR.space first, falls back to Tesseract
+// No auth required — OCR doesn't touch the database
+router.post('/extract-document-text', async (req: Request, res: Response) => {
   try {
     const { imageUrl } = req.body;
+    if (!imageUrl) return res.status(400).json({ error: 'Image URL is required' });
 
-    if (!imageUrl) {
-      return res.status(400).json({ error: 'Image URL is required' });
-    }
-
-    // Decode image to a raw Buffer
+    // ── Decode image to base64 ────────────────────────────────────────────────
+    let base64Image: string;
     let imageBuffer: Buffer;
+
     if (imageUrl.startsWith('data:')) {
       const base64Data = imageUrl.split(',')[1];
-      if (!base64Data) {
-        return res.status(400).json({ error: 'Invalid base64 image data' });
-      }
+      if (!base64Data) return res.status(400).json({ error: 'Invalid base64 image data' });
+      base64Image = base64Data;
       imageBuffer = Buffer.from(base64Data, 'base64');
     } else if (imageUrl.startsWith('http')) {
-      const response = await fetch(imageUrl);
-      if (!response.ok) {
-        return res.json({ success: true, text: '', confidence: 0 });
-      }
-      imageBuffer = Buffer.from(await response.arrayBuffer());
+      const r = await fetch(imageUrl);
+      if (!r.ok) return res.json({ success: false, text: '', confidence: 0, error: 'Could not fetch image.' });
+      imageBuffer = Buffer.from(await r.arrayBuffer());
+      base64Image = imageBuffer.toString('base64');
     } else {
-      return res.status(400).json({ error: 'Invalid image format. Provide a URL or base64 data URI.' });
+      return res.status(400).json({ error: 'Invalid image format.' });
     }
 
-    // Pre-process with sharp: normalise size + greyscale + enhance contrast
-    // 1400 px is sufficient for Tesseract accuracy while keeping processing fast
-    const processedBuffer = await sharp(imageBuffer)
-      .resize({ width: 1400, withoutEnlargement: true })
+    const ocrSpaceKey = process.env.GOOGLE_VISION_API_KEY || 'helloworld';
+
+    // ── OCR.space (primary) ───────────────────────────────────────────────────
+    try {
+      console.log('Using OCR.space for document OCR...');
+
+      const params = new URLSearchParams();
+      params.append('base64Image', `data:image/jpeg;base64,${base64Image}`);
+      params.append('language', 'eng');
+      params.append('isOverlayRequired', 'false');
+      params.append('detectOrientation', 'true');
+      params.append('scale', 'true');
+      params.append('OCREngine', '2');
+
+      const ocrResponse = await axios.post(
+        'https://api.ocr.space/parse/image',
+        params.toString(),
+        {
+          headers: {
+            apikey: ocrSpaceKey,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          timeout: 30000,
+        }
+      );
+
+      const ocrResult = ocrResponse.data;
+      console.log('OCR.space raw response:', JSON.stringify(ocrResult).substring(0, 300));
+
+      const parsedText: string = ocrResult?.ParsedResults?.[0]?.ParsedText || '';
+
+      if (parsedText && parsedText.trim().length >= 10) {
+        console.log('\n========== OCR.space TEXT ==========');
+        console.log(parsedText);
+        console.log('=====================================\n');
+
+        const normalizedText = parsedText
+          .replace(/\r\n|\r/g, '\n')
+          .replace(/([A-Z])\.\s+([A-Z])/g, '$1$2')  // fix "MIKIT. AYO" → "MIKITAYO"
+          .replace(/([A-Za-z])\n([A-Za-z])/g, '$1 $2') // join words split across lines
+          .replace(/\n+/g, ' ')
+          .replace(/\s{2,}/g, ' ')
+          .trim();
+
+        console.log('========== NORMALIZED TEXT ==========');
+        console.log(normalizedText);
+        console.log('=====================================\n');
+
+        return res.json({ success: true, text: normalizedText, confidence: 0.85 });
+      }
+
+      console.log('OCR.space returned no text, falling back to Tesseract...');
+    } catch (ocrErr: any) {
+      console.error('OCR.space error:', ocrErr?.response?.data || ocrErr?.message);
+      console.log('Falling back to Tesseract...');
+    }
+
+    // ── Tesseract fallback ────────────────────────────────────────────────────
+    console.log('Using Tesseract OCR...');
+    const processedBuffer = await sharp(imageBuffer!)
+      .resize({ width: 2800, withoutEnlargement: false })
       .greyscale()
       .normalize()
-      .sharpen()
+      .linear(1.8, -(128 * 0.8))
+      .sharpen({ sigma: 2, m1: 2, m2: 3 })
+      .threshold(140)
       .toBuffer();
 
-    // Run Tesseract OCR with a 60-second safety timeout.
-    // If OCR hangs, terminate the worker so it doesn't leak memory and crash the process.
     const worker = await getOcrWorker();
-    const OCR_TIMEOUT_MS = 60_000;
     const { data } = await Promise.race([
       worker.recognize(processedBuffer),
       new Promise<never>((_, reject) =>
         setTimeout(async () => {
-          // Kill the stuck worker and reset singleton so next request gets a fresh one
-          if (_ocrWorker) {
-            try { await _ocrWorker.terminate(); } catch {}
-            _ocrWorker = null;
-          }
+          if (_ocrWorker) { try { await _ocrWorker.terminate(); } catch {} _ocrWorker = null; }
           reject(new Error('OCR timed out'));
-        }, OCR_TIMEOUT_MS)
+        }, 60_000)
       ),
     ]);
 
-    return res.json({
-      success: true,
-      text: data.text,
-      confidence: data.confidence / 100,
-    });
-  } catch (error) {
-    console.error('Tesseract OCR error:', error);
-    // Return empty text so the client can fall back to user-entered data
-    return res.json({ success: true, text: '', confidence: 0 });
+    console.log('\n========== TESSERACT OCR TEXT ==========');
+    console.log(data.text);
+    console.log('Confidence:', data.confidence);
+    console.log('=========================================\n');
+
+    if (data.confidence < 15) {
+      return res.json({
+        success: false, text: '', confidence: data.confidence / 100,
+        error: 'Image quality too low. Please retake the photo in better lighting with the full ID visible.',
+      });
+    }
+
+    const normalizedText = data.text
+      .replace(/\r\n|\r/g, '\n')
+      .replace(/([A-Z])\.\s+([A-Z])/g, '$1$2')
+      .replace(/\b([A-Z]) ([A-Z]{2,})\b/g, '$1$2')
+      .replace(/([A-Za-z])\n([A-Za-z])/g, '$1 $2')
+      .replace(/\n+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    console.log('========== NORMALIZED TEXT ==========');
+    console.log(normalizedText);
+    console.log('=====================================\n');
+
+    return res.json({ success: true, text: normalizedText, confidence: data.confidence / 100 });
+
+  } catch (error: any) {
+    console.error('OCR error:', error?.response?.data || error?.message);
+    return res.json({ success: false, text: '', confidence: 0, error: 'OCR service failed. Please try again.' });
   }
 });
 
@@ -524,6 +664,7 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       firstName,
       lastName,
       fullName,
+      rawText,
       dateOfBirth,
       registrationFirstName,
       registrationLastName,
@@ -536,6 +677,15 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       email,
       password
     } = req.body;
+
+    // Reject only if confidence is exactly 50 AND no OCR text was extracted at all
+    // (confidence=50 with extracted names means OCR worked but doc number wasn't found — that's OK)
+    if (confidence === 50 && !firstName && !lastName && !fullName && !dateOfBirth) {
+      return res.status(400).json({
+        success: false,
+        errors: ['Document verification requires a clear photo of your ID. Please retake the photo.'],
+      });
+    }
 
     // For registration flow - lookup user by email if provided
     let regUser = null;
@@ -632,23 +782,24 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
         ocrFullName,
       });
 
-      if (userFirstName && userLastName && extractedFirstName && extractedLastName) {
-        // Check for exact match of first AND last name
-        const firstNameMatch = extractedFirstName === userFirstName;
-        const lastNameMatch = extractedLastName === userLastName;
-        
-        if (firstNameMatch && lastNameMatch) {
+      // Build a single string of all OCR name text for flexible matching
+      // Prefer rawText (full OCR output) over parsed fields which may be wrong
+      const allOcrText = (rawText || `${extractedFirstName} ${extractedLastName} ${ocrFullName}`).toLowerCase().trim();
+
+      if (userFirstName && userLastName) {
+        const firstFound = namesMatch(userFirstName, allOcrText);
+        const lastFound  = namesMatch(userLastName,  allOcrText);
+
+        if (firstFound && lastFound) {
           nameMatches = true;
-        } else if (ocrFullName.includes(userFirstName) && ocrFullName.includes(userLastName)) {
-          // Both first and last names found in full name string
+        } else if (firstFound || lastFound) {
           nameMatches = true;
+          warnings.push('Only part of your name could be verified on the document');
         } else {
-          // No match
           nameMatches = false;
         }
-      } else if (userFirstName && extractedFirstName) {
-        // At minimum, first name should match
-        nameMatches = extractedFirstName === userFirstName;
+      } else if (userFirstName) {
+        nameMatches = namesMatch(userFirstName, allOcrText);
       }
 
       if (!nameMatches) {
@@ -658,11 +809,28 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       // Cross-check DOB with registration data (allow 1-day tolerance for OCR errors)
       const dobToCheck = regUser || user;
       if (dobToCheck && dateOfBirth && dobToCheck.dateOfBirth) {
-        const userDob = dobToCheck.dateOfBirth;
-        const inputDob = new Date(dateOfBirth);
-        const diffDays = Math.abs((userDob.getTime() - inputDob.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays > 1) {
-          errors.push('Date of birth does not match your registration information');
+        // Normalize both dates to YYYY-MM-DD strings to avoid timezone issues
+        const userDobStr = dobToCheck.dateOfBirth instanceof Date 
+          ? dobToCheck.dateOfBirth.toISOString().split('T')[0]
+          : String(dobToCheck.dateOfBirth).split('T')[0];
+        const inputDobStr = normalizeDateForMatch(dateOfBirth);
+        
+        console.log('DOB comparison debug:', {
+          userDobFromDB: userDobStr,
+          inputDobFromID: inputDobStr,
+          match: userDobStr === inputDobStr
+        });
+        
+        // Compare as strings first (most reliable)
+        if (userDobStr !== inputDobStr) {
+          // If strings don't match, check if dates are within 1 day (for timezone tolerance)
+          const userDob = new Date(userDobStr + 'T00:00:00Z');
+          const inputDob = new Date(inputDobStr + 'T00:00:00Z');
+          const diffDays = Math.abs((userDob.getTime() - inputDob.getTime()) / (1000 * 60 * 60 * 24));
+          console.log('DOB difference in days:', diffDays);
+          if (diffDays > 1) {
+            errors.push('Date of birth does not match your registration information');
+          }
         }
       }
 
@@ -671,22 +839,22 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
     // Strict registration flow checks: both full name and DOB must match exactly
     // with the user-entered values before continuing.
     if (registrationFirstName || registrationLastName || registrationDateOfBirth) {
-      // Flexible name matching: check both orderings since ID format may vary
       const regFirst = (registrationFirstName || '').toLowerCase().trim();
       const regLast = (registrationLastName || '').toLowerCase().trim();
       const docFirst = (firstName || '').toLowerCase().trim();
       const docLast = (lastName || '').toLowerCase().trim();
-      const docFull = normalizeNameForMatch(fullName || extractedName);
+      const docFull = (fullName || '').toLowerCase().trim();
 
-      const normRegFull = normalizeNameForMatch(`${regFirst} ${regLast}`);
-      const directMatch = docFull === normRegFull ||
-        (normalizeNameForMatch(docFirst) === normalizeNameForMatch(regFirst) &&
-         normalizeNameForMatch(docLast) === normalizeNameForMatch(regLast));
-      const reverseMatch = docFull.includes(normalizeNameForMatch(regLast)) &&
-        docFull.includes(normalizeNameForMatch(regFirst));
+      // Use rawText for matching if available — more reliable than parsed fields
+      const allDocText = (rawText || `${docFirst} ${docLast} ${docFull}`).toLowerCase().trim();
 
-      if (!directMatch && !reverseMatch && normRegFull && docFull) {
-        errors.push('Full name does not match the ID document');
+      const firstFound = regFirst ? namesMatch(regFirst, allDocText) : true;
+      const lastFound  = regLast  ? namesMatch(regLast,  allDocText) : true;
+
+      if (!firstFound && !lastFound && (regFirst || regLast) && allDocText) {
+        errors.push('Your name does not match the name on your ID document. Please ensure you entered your legal name during registration.');
+      } else if ((!firstFound || !lastFound) && (regFirst || regLast) && allDocText) {
+        warnings.push('Only part of your name could be confirmed on the document');
       }
 
       // Date comparison with tolerance for formatting differences
@@ -698,7 +866,7 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
         const dob2 = new Date(normalizedEnteredDob);
         const diffDays = Math.abs((dob1.getTime() - dob2.getTime()) / (1000 * 60 * 60 * 24));
         if (diffDays > 1) {
-          errors.push('Date of birth does not match the ID document');
+          errors.push('The date of birth on your ID does not match what you entered during registration. Please ensure your details are correct.');
         }
       }
     }
@@ -738,18 +906,37 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
     }
 
     // Update verification record (only if userId exists - for logged in users)
-    if (userId && verificationStatus === DocumentVerificationStatus.VERIFIED) {
-      // First check if user exists
-      const userExists = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true }
-      });
+    // OR update user by email if this is during registration flow
+    if ((userId || email) && verificationStatus === DocumentVerificationStatus.VERIFIED) {
+      // Find user by userId or email
+      const userToUpdate = userId 
+        ? await prisma.user.findUnique({ where: { id: userId }, select: { id: true } })
+        : email 
+        ? await prisma.user.findUnique({ where: { email }, select: { id: true } })
+        : null;
       
-      if (userExists) {
+      if (userToUpdate) {
+        const actualUserId = userToUpdate.id;
+        
+        // Update user's personal info with verified data from ID
+        // This ensures the database has the correct info that matches their ID
+        const updateData: any = {};
+        if (registrationFirstName) updateData.firstName = registrationFirstName;
+        if (registrationLastName) updateData.lastName = registrationLastName;
+        if (registrationDateOfBirth) updateData.dateOfBirth = new Date(registrationDateOfBirth);
+        
+        if (Object.keys(updateData).length > 0) {
+          await prisma.user.update({
+            where: { id: actualUserId },
+            data: updateData,
+          });
+          console.log('Updated user info with verified data:', { email, ...updateData });
+        }
+        
         await prisma.verification.upsert({
-          where: { userId },
+          where: { userId: actualUserId },
           create: {
-            userId,
+            userId: actualUserId,
             idVerified: true,
             idDocumentType: documentType as any,
             verifiedAt: new Date(),

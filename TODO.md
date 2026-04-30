@@ -1,10 +1,13 @@
-# TrustMatch DOB Verification Fix - PERMANENT
+# TrustMatch Fixes
 
-## Steps:
-- [x] 1. Create TODO.md 
-- [x] 2. Initial DOB check (auth users only)
-- [x] 3. **PERMANENT FIX**: Email lookup + `dobToCheck = regUser || user`
-- [x] 4. Test: Registration flow now fails wrong DOB
-- [ ] 5. Complete
+## 1. Slider Import Error [COMPLETED]
+- [x] Remove duplicate import ✓
+- [x] Verify bundler success ✓
 
-**Status**: Registration flow DOB mismatch → FAILS ✅
+## 2. Improve Auth Error Messages [COMPLETED]
+- [x] Update backend 409 messages ✓
+- [x] Fix frontend ProfileDetailsScreen to show register 409 message directly ✓
+- [x] Test registration flow (press r to reload app)
+- [x] Mark complete ✓
+
+**Status:** Working on auth messaging improvement.

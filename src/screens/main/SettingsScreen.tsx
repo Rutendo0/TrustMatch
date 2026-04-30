@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,103 +7,376 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  TextInput,
+  Modal,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
+import { api } from '../../services/api';
+import { useTheme } from '../../context/ThemeContext';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 
-type SettingsScreenProps = {
-  navigation: NativeStackNavigationProp<any>;
-};
+type Props = { navigation: NativeStackNavigationProp<any> };
 
-interface SettingItem {
-  id: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  subtitle?: string;
-  type: 'toggle' | 'link' | 'action';
-  value?: boolean;
-  onPress?: () => void;
-  danger?: boolean;
+// ─── Preference keys stored locally ──────────────────────────────────────────
+const PREFS_KEY = 'trustmatch_user_prefs_v1';
+
+interface UserPrefs {
+  pushNotifications: boolean;
+  matchAlerts: boolean;
+  messageAlerts: boolean;
+  showOnlineStatus: boolean;
+  showAge: boolean;
 }
 
-export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
-  const [notifications, setNotifications] = useState(true);
-  const [matchNotifications, setMatchNotifications] = useState(true);
-  const [messageNotifications, setMessageNotifications] = useState(true);
-  const [showOnlineStatus, setShowOnlineStatus] = useState(true);
-  const [showDistance, setShowDistance] = useState(true);
-  const [showAge, setShowAge] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
-  const [biometricLogin, setBiometricLogin] = useState(false);
+const DEFAULT_PREFS: UserPrefs = {
+  pushNotifications: true,
+  matchAlerts: true,
+  messageAlerts: true,
+  showOnlineStatus: true,
+  showAge: true,
+};
+
+// ─── Change Password Modal ────────────────────────────────────────────────────
+const ChangePasswordModal: React.FC<{
+  visible: boolean;
+  onClose: () => void;
+}> = ({ visible, onClose }) => {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
+
+  const reset = () => {
+    setCurrent(''); setNext(''); setConfirm('');
+    setShowCurrent(false); setShowNext(false);
+  };
+
+  const handleClose = () => { reset(); onClose(); };
+
+  const handleSubmit = async () => {
+    if (!current || !next || !confirm) {
+      Alert.alert('Missing Fields', 'Please fill in all fields.'); return;
+    }
+    if (next.length < 8) {
+      Alert.alert('Too Short', 'New password must be at least 8 characters.'); return;
+    }
+    if (next !== confirm) {
+      Alert.alert('Mismatch', 'New passwords do not match.'); return;
+    }
+    setLoading(true);
+    try {
+      await api.changePassword(current, next);
+      Alert.alert('Password Changed', 'Your password has been updated. Please log in again on all devices.', [
+        { text: 'OK', onPress: handleClose },
+      ]);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to change password.';
+      Alert.alert('Error', msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
+      <View style={modal.overlay}>
+        <View style={modal.sheet}>
+          <View style={modal.header}>
+            <Text style={modal.title}>Change Password</Text>
+            <TouchableOpacity onPress={handleClose}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+
+          {(['Current Password', 'New Password', 'Confirm New Password'] as const).map((label, i) => {
+            const value = i === 0 ? current : i === 1 ? next : confirm;
+            const setter = i === 0 ? setCurrent : i === 1 ? setNext : setConfirm;
+            const show = i === 0 ? showCurrent : showNext;
+            const toggleShow = i === 0
+              ? () => setShowCurrent(v => !v)
+              : i === 1 ? () => setShowNext(v => !v) : undefined;
+
+            return (
+              <View key={label} style={modal.fieldWrap}>
+                <Text style={modal.label}>{label}</Text>
+                <View style={modal.inputRow}>
+                  <TextInput
+                    style={modal.input}
+                    value={value}
+                    onChangeText={setter}
+                    secureTextEntry={!show}
+                    placeholder={label}
+                    placeholderTextColor={COLORS.textLight}
+                    autoCapitalize="none"
+                  />
+                  {toggleShow && (
+                    <TouchableOpacity onPress={toggleShow} style={modal.eyeBtn}>
+                      <Ionicons name={show ? 'eye-off' : 'eye'} size={20} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+
+          <TouchableOpacity
+            style={[modal.btn, loading && { opacity: 0.7 }]}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={modal.btnText}>Update Password</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ─── Blocked Users Modal ──────────────────────────────────────────────────────
+const BlockedUsersModal: React.FC<{
+  visible: boolean;
+  onClose: () => void;
+}> = ({ visible, onClose }) => (
+  <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <View style={modal.overlay}>
+      <View style={modal.sheet}>
+        <View style={modal.header}>
+          <Text style={modal.title}>Blocked Users</Text>
+          <TouchableOpacity onPress={onClose}>
+            <Ionicons name="close" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+        </View>
+        <View style={{ alignItems: 'center', paddingVertical: SPACING.xl }}>
+          <Ionicons name="ban-outline" size={48} color={COLORS.textLight} />
+          <Text style={{ marginTop: SPACING.md, color: COLORS.textSecondary, fontSize: FONTS.sizes.md }}>
+            No blocked users
+          </Text>
+          <Text style={{ marginTop: SPACING.xs, color: COLORS.textLight, fontSize: FONTS.sizes.sm, textAlign: 'center' }}>
+            Users you block will appear here.{'\n'}You can block someone from their profile.
+          </Text>
+        </View>
+      </View>
+    </View>
+  </Modal>
+);
+
+// ─── Verification Status Modal ────────────────────────────────────────────────
+const VerificationModal: React.FC<{
+  visible: boolean;
+  onClose: () => void;
+  verification: any;
+}> = ({ visible, onClose, verification }) => {
+  const checks = [
+    { label: 'ID Document', done: verification?.idVerified },
+    { label: 'Selfie Match', done: verification?.selfieVerified },
+    { label: 'Email', done: verification?.emailVerified },
+    { label: 'Phone', done: verification?.phoneVerified },
+    { label: 'Live Verified', done: verification?.liveVerified },
+  ];
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={modal.overlay}>
+        <View style={modal.sheet}>
+          <View style={modal.header}>
+            <Text style={modal.title}>Verification Status</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={{ gap: SPACING.md, paddingTop: SPACING.sm }}>
+            {checks.map(c => (
+              <View key={c.label} style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.md }}>
+                <Ionicons
+                  name={c.done ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={24}
+                  color={c.done ? COLORS.success : COLORS.textLight}
+                />
+                <Text style={{ fontSize: FONTS.sizes.md, color: c.done ? COLORS.text : COLORS.textSecondary }}>
+                  {c.label}
+                </Text>
+                <Text style={{ marginLeft: 'auto', fontSize: FONTS.sizes.sm, fontWeight: '600',
+                  color: c.done ? COLORS.success : COLORS.textSecondary }}>
+                  {c.done ? 'Verified' : 'Pending'}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ─── Report Problem Modal ─────────────────────────────────────────────────────
+const ReportModal: React.FC<{
+  visible: boolean;
+  onClose: () => void;
+}> = ({ visible, onClose }) => {
+  const [text, setText] = useState('');
+  const [sent, setSent] = useState(false);
+
+  const handleSend = () => {
+    if (!text.trim()) { Alert.alert('Empty', 'Please describe the problem.'); return; }
+    setSent(true);
+    setTimeout(() => { setSent(false); setText(''); onClose(); }, 1500);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={modal.overlay}>
+        <View style={modal.sheet}>
+          <View style={modal.header}>
+            <Text style={modal.title}>Report a Problem</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+          {sent ? (
+            <View style={{ alignItems: 'center', paddingVertical: SPACING.xl }}>
+              <Ionicons name="checkmark-circle" size={48} color={COLORS.success} />
+              <Text style={{ marginTop: SPACING.md, color: COLORS.success, fontWeight: '600', fontSize: FONTS.sizes.md }}>
+                Report sent. Thank you!
+              </Text>
+            </View>
+          ) : (
+            <>
+              <Text style={modal.label}>Describe the issue</Text>
+              <TextInput
+                style={[modal.input, { height: 120, textAlignVertical: 'top', marginBottom: SPACING.lg }]}
+                value={text}
+                onChangeText={setText}
+                placeholder="Tell us what went wrong..."
+                placeholderTextColor={COLORS.textLight}
+                multiline
+              />
+              <TouchableOpacity style={modal.btn} onPress={handleSend}>
+                <Text style={modal.btnText}>Send Report</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
+  const { isDark, toggleTheme, colors } = useTheme();
+  const C = colors; // shorthand
+  const [prefs, setPrefs] = useState<UserPrefs>(DEFAULT_PREFS);
+  const [verification, setVerification] = useState<any>(null);
+
+  // Modals
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showBlocked, setShowBlocked] = useState(false);
+  const [showVerification, setShowVerification] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+
+  // Load saved prefs + verification on mount
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const raw = await SecureStore.getItemAsync(PREFS_KEY);
+        if (raw) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(raw) });
+      } catch {}
+      try {
+        const profile = await api.getProfile();
+        setVerification(profile?.verification ?? null);
+      } catch {}
+    };
+    load();
+  }, []);
+
+  const savePrefs = useCallback(async (updated: UserPrefs) => {
+    setPrefs(updated);
+    try {
+      await SecureStore.setItemAsync(PREFS_KEY, JSON.stringify(updated));
+    } catch {}
+  }, []);
+
+  const toggle = (key: keyof UserPrefs) =>
+    savePrefs({ ...prefs, [key]: !prefs[key] });
 
   const handleLogout = () => {
-    Alert.alert(
-      'Log Out',
-      'Are you sure you want to log out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Log Out', 
-          style: 'destructive',
-          onPress: () => navigation.reset({
-            index: 0,
-            routes: [{ name: 'Welcome' }],
-          })
+    Alert.alert('Log Out', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log Out', style: 'destructive',
+        onPress: async () => {
+          await api.logout();
+          navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] });
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Account',
-      'This action cannot be undone. All your data will be permanently deleted.',
+      'This cannot be undone. All your data will be permanently deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('Account Deleted', 'Your account has been deleted.');
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Welcome' }],
-            });
-          }
+        {
+          text: 'Delete', style: 'destructive',
+          onPress: () =>
+            Alert.alert(
+              'Are you absolutely sure?',
+              'Type DELETE to confirm.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Yes, Delete', style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await api.deleteAccount();
+                    } catch {}
+                    await api.logout();
+                    navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] });
+                  },
+                },
+              ]
+            ),
         },
       ]
     );
   };
 
-  const settingSections = [
+  // ── Section definitions ──────────────────────────────────────────────────
+  const sections = [
     {
       title: 'Account',
       items: [
         {
-          id: 'edit-profile',
           icon: 'person-outline' as const,
           title: 'Edit Profile',
-          subtitle: 'Update your photos and bio',
+          subtitle: 'Update your photos, bio and details',
           type: 'link' as const,
           onPress: () => navigation.navigate('ProfileSetup', { formData: {} }),
         },
         {
-          id: 'verification',
-          icon: 'shield-checkmark-outline' as const,
-          title: 'Verification Status',
-          subtitle: 'ID verified, Selfie verified',
+          icon: 'options-outline' as const,
+          title: 'Discovery Preferences',
+          subtitle: 'Age range, city, who you see',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => navigation.navigate('Filters'),
         },
         {
-          id: 'subscription',
-          icon: 'diamond-outline' as const,
-          title: 'Subscription',
-          subtitle: 'Free Plan',
+          icon: 'shield-checkmark-outline' as const,
+          title: 'Verification Status',
+          subtitle: verification?.isVerified ? '✅ Fully verified' : 'Tap to see details',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => setShowVerification(true),
         },
       ],
     },
@@ -111,28 +384,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       title: 'Notifications',
       items: [
         {
-          id: 'notifications',
           icon: 'notifications-outline' as const,
           title: 'Push Notifications',
           type: 'toggle' as const,
-          value: notifications,
-          onPress: () => setNotifications(!notifications),
+          value: prefs.pushNotifications,
+          onToggle: () => toggle('pushNotifications'),
         },
         {
-          id: 'match-notifications',
           icon: 'heart-outline' as const,
           title: 'New Match Alerts',
           type: 'toggle' as const,
-          value: matchNotifications,
-          onPress: () => setMatchNotifications(!matchNotifications),
+          value: prefs.matchAlerts,
+          onToggle: () => toggle('matchAlerts'),
         },
         {
-          id: 'message-notifications',
           icon: 'chatbubble-outline' as const,
           title: 'Message Notifications',
           type: 'toggle' as const,
-          value: messageNotifications,
-          onPress: () => setMessageNotifications(!messageNotifications),
+          value: prefs.messageAlerts,
+          onToggle: () => toggle('messageAlerts'),
         },
       ],
     },
@@ -140,36 +410,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       title: 'Privacy',
       items: [
         {
-          id: 'online-status',
           icon: 'ellipse' as const,
           title: 'Show Online Status',
           type: 'toggle' as const,
-          value: showOnlineStatus,
-          onPress: () => setShowOnlineStatus(!showOnlineStatus),
+          value: prefs.showOnlineStatus,
+          onToggle: () => toggle('showOnlineStatus'),
         },
         {
-          id: 'show-distance',
-          icon: 'location-outline' as const,
-          title: 'Show Distance',
-          type: 'toggle' as const,
-          value: showDistance,
-          onPress: () => setShowDistance(!showDistance),
-        },
-        {
-          id: 'show-age',
           icon: 'calendar-outline' as const,
-          title: 'Show Age',
+          title: 'Show Age on Profile',
           type: 'toggle' as const,
-          value: showAge,
-          onPress: () => setShowAge(!showAge),
+          value: prefs.showAge,
+          onToggle: () => toggle('showAge'),
         },
         {
-          id: 'blocked-users',
           icon: 'ban-outline' as const,
           title: 'Blocked Users',
-          subtitle: '0 blocked',
+          subtitle: 'Manage who you\'ve blocked',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => setShowBlocked(true),
         },
       ],
     },
@@ -177,27 +436,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       title: 'Security',
       items: [
         {
-          id: 'biometric',
-          icon: 'finger-print-outline' as const,
-          title: 'Biometric Login',
-          type: 'toggle' as const,
-          value: biometricLogin,
-          onPress: () => setBiometricLogin(!biometricLogin),
-        },
-        {
-          id: 'change-password',
           icon: 'lock-closed-outline' as const,
           title: 'Change Password',
+          subtitle: 'Update your account password',
           type: 'link' as const,
-          onPress: () => {},
-        },
-        {
-          id: 'two-factor',
-          icon: 'key-outline' as const,
-          title: 'Two-Factor Authentication',
-          subtitle: 'Not enabled',
-          type: 'link' as const,
-          onPress: () => {},
+          onPress: () => setShowChangePassword(true),
         },
       ],
     },
@@ -205,12 +448,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       title: 'Appearance',
       items: [
         {
-          id: 'dark-mode',
           icon: 'moon-outline' as const,
           title: 'Dark Mode',
+          subtitle: isDark ? 'Currently dark' : 'Currently light',
           type: 'toggle' as const,
-          value: darkMode,
-          onPress: () => setDarkMode(!darkMode),
+          value: isDark,
+          onToggle: toggleTheme,
         },
       ],
     },
@@ -218,39 +461,37 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       title: 'Support',
       items: [
         {
-          id: 'help',
           icon: 'help-circle-outline' as const,
           title: 'Help Center',
+          subtitle: 'FAQs and guides',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => Linking.openURL('mailto:support@trustmatch.app'),
         },
         {
-          id: 'safety',
           icon: 'shield-outline' as const,
-          title: 'Safety Tips',
+          title: 'Safety Center',
+          subtitle: 'Emergency, location sharing & tips',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => navigation.navigate('SafetyCenter'),
         },
         {
-          id: 'report',
           icon: 'flag-outline' as const,
           title: 'Report a Problem',
+          subtitle: 'Something not working right?',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => setShowReport(true),
         },
         {
-          id: 'terms',
           icon: 'document-text-outline' as const,
           title: 'Terms of Service',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => Linking.openURL('https://trustmatch.app/terms'),
         },
         {
-          id: 'privacy-policy',
           icon: 'eye-outline' as const,
           title: 'Privacy Policy',
           type: 'link' as const,
-          onPress: () => {},
+          onPress: () => Linking.openURL('https://trustmatch.app/privacy'),
         },
       ],
     },
@@ -258,98 +499,113 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       title: 'Account Actions',
       items: [
         {
-          id: 'logout',
           icon: 'log-out-outline' as const,
           title: 'Log Out',
           type: 'action' as const,
-          onPress: handleLogout,
           danger: false,
+          onPress: handleLogout,
         },
         {
-          id: 'delete',
           icon: 'trash-outline' as const,
           title: 'Delete Account',
+          subtitle: 'Permanently remove all your data',
           type: 'action' as const,
-          onPress: handleDeleteAccount,
           danger: true,
+          onPress: handleDeleteAccount,
         },
       ],
     },
   ];
 
-  const renderSettingItem = (item: SettingItem) => (
-    <TouchableOpacity
-      key={item.id}
-      style={styles.settingItem}
-      onPress={item.type === 'toggle' ? undefined : item.onPress}
-      disabled={item.type === 'toggle'}
-    >
-      <View style={[styles.iconContainer, item.danger && styles.dangerIcon]}>
-        <Ionicons 
-          name={item.icon} 
-          size={22} 
-          color={item.danger ? COLORS.error : COLORS.primary} 
-        />
-      </View>
-      <View style={styles.settingContent}>
-        <Text style={[styles.settingTitle, item.danger && styles.dangerText]}>
-          {item.title}
-        </Text>
-        {item.subtitle && (
-          <Text style={styles.settingSubtitle}>{item.subtitle}</Text>
-        )}
-      </View>
-      {item.type === 'toggle' && (
-        <Switch
-          value={item.value}
-          onValueChange={item.onPress}
-          trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
-          thumbColor={item.value ? COLORS.primary : COLORS.textLight}
-        />
-      )}
-      {item.type === 'link' && (
-        <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-      )}
-    </TouchableOpacity>
-  );
-
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+    <SafeAreaView style={[styles.container, { backgroundColor: C.backgroundGray }]}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: C.white, borderBottomColor: C.border }]}>
+        <TouchableOpacity style={[styles.backBtn, { backgroundColor: C.background }]} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color={C.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
-        <View style={styles.placeholder} />
+        <Text style={[styles.headerTitle, { color: C.text }]}>Settings</Text>
+        <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView 
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {settingSections.map((section) => (
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {sections.map(section => (
           <View key={section.title} style={styles.section}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            <View style={styles.sectionContent}>
-              {section.items.map(renderSettingItem)}
+            <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>{section.title}</Text>
+            <View style={[styles.sectionCard, { backgroundColor: C.white }]}>
+              {section.items.map((item, idx) => (
+                <TouchableOpacity
+                  key={item.title}
+                  style={[
+                    styles.row,
+                    idx < section.items.length - 1 && [styles.rowBorder, { borderBottomColor: C.border }],
+                  ]}
+                  onPress={item.type !== 'toggle' ? (item as any).onPress : undefined}
+                  activeOpacity={item.type === 'toggle' ? 1 : 0.7}
+                >
+                  <View style={[styles.iconWrap, (item as any).danger && styles.iconWrapDanger,
+                    { backgroundColor: (item as any).danger ? C.errorLight : C.primarySoft }]}>
+                    <Ionicons
+                      name={item.icon}
+                      size={20}
+                      color={(item as any).danger ? C.error : C.primary}
+                    />
+                  </View>
+
+                  <View style={styles.rowContent}>
+                    <Text style={[styles.rowTitle, { color: (item as any).danger ? C.error : C.text }]}>
+                      {item.title}
+                    </Text>
+                    {(item as any).subtitle && (
+                      <Text style={[styles.rowSubtitle, { color: C.textSecondary }]}>{(item as any).subtitle}</Text>
+                    )}
+                  </View>
+
+                  {item.type === 'toggle' && (
+                    <Switch
+                      value={(item as any).value}
+                      onValueChange={(item as any).onToggle}
+                      trackColor={{ false: C.border, true: C.primaryLight }}
+                      thumbColor={(item as any).value ? C.primary : C.textLight}
+                    />
+                  )}
+                  {item.type === 'link' && (
+                    <Ionicons name="chevron-forward" size={18} color={C.textLight} />
+                  )}
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
         ))}
 
-        <Text style={styles.version}>TrustMatch v1.0.0</Text>
+        <Text style={[styles.version, { color: C.textLight }]}>TrustMatch v1.0.0</Text>
       </ScrollView>
+
+      {/* Modals */}
+      <ChangePasswordModal
+        visible={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+      />
+      <BlockedUsersModal
+        visible={showBlocked}
+        onClose={() => setShowBlocked(false)}
+      />
+      <VerificationModal
+        visible={showVerification}
+        onClose={() => setShowVerification(false)}
+        verification={verification}
+      />
+      <ReportModal
+        visible={showReport}
+        onClose={() => setShowReport(false)}
+      />
     </SafeAreaView>
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
+  container: { flex: 1, backgroundColor: COLORS.backgroundGray },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -360,83 +616,116 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  backBtn: {
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: FONTS.sizes.xl,
-    fontWeight: 'bold',
-    color: COLORS.text,
+    fontSize: FONTS.sizes.xl, fontWeight: '700', color: COLORS.text,
   },
-  placeholder: {
-    width: 40,
-  },
-  content: {
-    flex: 1,
-  },
-  section: {
-    marginTop: SPACING.lg,
-  },
+  section: { marginTop: SPACING.lg },
   sectionTitle: {
-    fontSize: FONTS.sizes.sm,
-    fontWeight: '600',
+    fontSize: FONTS.sizes.xs,
+    fontWeight: '700',
     color: COLORS.textSecondary,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
     paddingHorizontal: SPACING.lg,
     marginBottom: SPACING.sm,
   },
-  sectionContent: {
+  sectionCard: {
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.lg,
     marginHorizontal: SPACING.lg,
     ...SHADOWS.small,
+    overflow: 'hidden',
   },
-  settingItem: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: SPACING.md,
     paddingHorizontal: SPACING.md,
+  },
+  rowBorder: {
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  iconWrap: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
     marginRight: SPACING.md,
   },
-  dangerIcon: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  iconWrapDanger: {
+    backgroundColor: COLORS.errorLight,
   },
-  settingContent: {
-    flex: 1,
+  rowContent: { flex: 1 },
+  rowTitle: {
+    fontSize: FONTS.sizes.md, fontWeight: '500', color: COLORS.text,
   },
-  settingTitle: {
-    fontSize: FONTS.sizes.md,
-    fontWeight: '500',
-    color: COLORS.text,
-  },
-  dangerText: {
-    color: COLORS.error,
-  },
-  settingSubtitle: {
-    fontSize: FONTS.sizes.sm,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+  rowSubtitle: {
+    fontSize: FONTS.sizes.sm, color: COLORS.textSecondary, marginTop: 2,
   },
   version: {
-    fontSize: FONTS.sizes.sm,
-    color: COLORS.textLight,
-    textAlign: 'center',
-    paddingVertical: SPACING.xl,
+    fontSize: FONTS.sizes.sm, color: COLORS.textLight,
+    textAlign: 'center', paddingVertical: SPACING.xl,
+  },
+});
+
+const modal = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: BORDER_RADIUS.xl,
+    borderTopRightRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    paddingBottom: SPACING.xxl,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  title: {
+    fontSize: FONTS.sizes.lg, fontWeight: '700', color: COLORS.text,
+  },
+  label: {
+    fontSize: FONTS.sizes.sm, fontWeight: '600',
+    color: COLORS.text, marginBottom: SPACING.xs,
+  },
+  fieldWrap: { marginBottom: SPACING.md },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.background,
+  },
+  input: {
+    flex: 1,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    fontSize: FONTS.sizes.md,
+    color: COLORS.text,
+  },
+  eyeBtn: {
+    padding: SPACING.sm,
+  },
+  btn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.full,
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    marginTop: SPACING.sm,
+  },
+  btnText: {
+    color: '#fff', fontSize: FONTS.sizes.md, fontWeight: '700',
   },
 });

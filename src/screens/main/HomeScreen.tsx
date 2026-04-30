@@ -6,14 +6,17 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VerifiedBadge } from '../../components/common';
+import { MatchModal } from '../../components/match/MatchModal';
 import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
+import { useTheme } from '../../context/ThemeContext';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 interface Profile {
@@ -49,7 +52,7 @@ const MOCK_PROFILES: Profile[] = [
     name: 'Sarah',
     age: 28,
     bio: 'Coffee enthusiast ☕ | Love hiking and outdoor adventures | Looking for genuine connections',
-    distance: '3 km away',
+    distance: 'Harare',
     photos: [
       'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
       'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
@@ -68,7 +71,7 @@ const MOCK_PROFILES: Profile[] = [
     name: 'Emily',
     age: 25,
     bio: 'Artist and dreamer 🎨 | Dog mom | Here to find my person',
-    distance: '5 km away',
+    distance: 'Bulawayo',
     photos: [
       'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400',
       'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400'
@@ -86,7 +89,7 @@ const MOCK_PROFILES: Profile[] = [
     name: 'Jessica',
     age: 30,
     bio: 'Foodie exploring the city 🍕 | Tech professional | Looking for someone to share adventures with',
-    distance: '8 km away',
+    distance: 'Mutare',
     photos: [
       'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400',
       'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
@@ -108,6 +111,7 @@ type HomeScreenProps = {
 };
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
+  const { colors } = useTheme();
   const { width, height, wp, hp, normalize, isLandscape, isTablet } = useResponsive();
 
   // ALL HOOKS AT TOP - NO EARLY RETURNS BEFORE THIS POINT
@@ -171,6 +175,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [likedProfiles, setLikedProfiles] = useState<string[]>([]);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [myProfile, setMyProfile] = useState<{ name: string; photo: string; interests: string[] } | null>(null);
+  const [matchModal, setMatchModal] = useState<{ visible: boolean; profile: Profile | null; matchId: string | null }>({ visible: false, profile: null, matchId: null });
+  const [lastDisliked, setLastDisliked] = useState<{ profile: Profile; index: number } | null>(null);
 
   // Effects
   useEffect(() => {
@@ -256,27 +263,52 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   const fetchProfiles = useCallback(async () => {
     setLoading(true);
+    console.log('Fetching discover profiles...');
+    
     try {
       let filters = {};
       try {
         const userProfile = await api.getProfile();
+        console.log('User profile loaded:', { 
+          id: userProfile?.id, 
+          firstName: userProfile?.firstName,
+          preferences: userProfile?.preferences 
+        });
+        
         filters = {
           gender: userProfile?.preferences?.showMe,
           ageMin: userProfile?.preferences?.ageRange?.min,
           ageMax: userProfile?.preferences?.ageRange?.max,
-          distance: userProfile?.preferences?.distance,
         };
-      } catch (profileError) {
+        
+        // Store my profile for the match modal
+        setMyProfile({
+          name: userProfile?.firstName || 'You',
+          photo: userProfile?.photos?.[0]?.url || userProfile?.photos?.[0] || '',
+          interests: userProfile?.interests || [],
+        });
+      } catch (profileError: any) {
         console.warn('Could not fetch user preferences:', profileError);
+        console.warn('Error details:', profileError.response?.data || profileError.message);
       }
       
+      console.log('Fetching profiles with filters:', filters);
       const data = await api.getDiscoverProfiles(10, filters);
+      console.log('Received profiles:', data?.length || 0);
+      
+      if (!data || data.length === 0) {
+        console.log('No profiles returned from API');
+        setProfiles([]);
+        setLoading(false);
+        return;
+      }
+      
       const mappedProfiles: Profile[] = (data || []).map((p: any) => ({
         id: p?.id || Math.random().toString(),
         name: p?.firstName || p?.name || 'User',
         age: p?.age || 25,
         bio: p?.bio || 'No bio available',
-        distance: p?.city ? `${p.city}` : 'Unknown distance',
+        distance: p?.city || p?.country || 'Unknown location',
         photos: p?.photos?.length > 0 ? p.photos : ['https://via.placeholder.com/400'],
         isVerified: p?.isVerified || false,
         trustScore: p?.trustScore || 85,
@@ -286,45 +318,100 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         safetyFeatures: p?.isVerified ? ['Verified'] : [],
         verificationBadges: p?.isVerified ? ['Identity', 'Selfie'] : [],
       }));
+      
+      console.log('Mapped profiles:', mappedProfiles.length);
       setProfiles(mappedProfiles);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch profiles:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      });
+      
+      // Check if it's a verification error
+      if (error.response?.status === 403) {
+        Alert.alert(
+          'Verification Required',
+          'Please complete all verification steps to start discovering profiles.',
+          [
+            { text: 'Complete Verification', onPress: () => navigation.navigate('ProfileSetup', { formData: {} }) },
+            { text: 'Later' }
+          ]
+        );
+      } else {
+        // Show user-friendly error
+        Alert.alert(
+          'Could Not Load Profiles',
+          error.response?.data?.error || error.message || 'Please check your connection and try again.',
+          [
+            { text: 'Retry', onPress: () => fetchProfiles() },
+            { text: 'Cancel' }
+          ]
+        );
+      }
+      
       setProfiles([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [navigation]);
 
   const handleLike = useCallback(async () => {
-    if (currentProfile!) {
-      setLikedProfiles(prev => [...prev, currentProfile!.id]);
-      try {
-        await api.swipe(currentProfile!.id, 'LIKE');
-      } catch (error) {
-        console.error('Failed to swipe:', error);
+    if (!currentProfile) return;
+    
+    console.log('Liking profile:', currentProfile.id);
+    setLikedProfiles(prev => [...prev, currentProfile.id]);
+    
+    try {
+      const result = await api.swipe(currentProfile.id, 'LIKE');
+      console.log('Like result:', result);
+      
+      // If it's a mutual match, show the match modal
+      if (result?.isMatch) {
+        setMatchModal({ visible: true, profile: currentProfile, matchId: result.matchId || null });
+      } else {
+        // No match, just move to next profile
+        goToNext();
       }
+    } catch (error: any) {
+      console.error('Failed to swipe:', error);
+      console.error('Error details:', error.response?.data || error.message);
+      
+      // Show error to user
+      Alert.alert(
+        'Like Failed',
+        error.response?.data?.error || error.message || 'Could not like this profile. Please try again.',
+        [{ text: 'OK' }]
+      );
+      
+      // Remove from liked profiles since it failed
+      setLikedProfiles(prev => prev.filter(id => id !== currentProfile.id));
     }
-  }, [currentProfile]);
+  }, [currentProfile, goToNext]);
 
   const handleDislike = useCallback(async () => {
-    if (currentProfile!) {
-      try {
-        await api.swipe(currentProfile!.id, 'DISLIKE');
-      } catch (error) {
-        console.error('Failed to swipe:', error);
-      }
+    if (!currentProfile) return;
+    // Save for undo
+    setLastDisliked({ profile: currentProfile, index: currentIndex });
+    try {
+      await api.swipe(currentProfile.id, 'DISLIKE');
+    } catch (error) {
+      console.error('Failed to swipe:', error);
     }
-  }, [currentProfile]);
+    goToNext();
+  }, [currentProfile, currentIndex]);
 
-  const handleSuperLike = useCallback(async () => {
-    if (currentProfile!) {
-      try {
-        await api.swipe(currentProfile!.id, 'SUPERLIKE');
-      } catch (error) {
-        console.error('Failed to swipe:', error);
-      }
-    }
-  }, [currentProfile]);
+  const handleUndo = useCallback(async () => {
+    if (!lastDisliked) return;
+    // Re-insert the disliked profile at current position
+    setProfiles(prev => {
+      const updated = [...prev];
+      updated.splice(currentIndex, 0, lastDisliked.profile);
+      return updated;
+    });
+    setLastDisliked(null);
+  }, [lastDisliked, currentIndex]);
 
   const goToNext = useCallback(() => {
     if (currentIndex < profiles.length - 1) {
@@ -362,7 +449,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]}>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading profiles...</Text>
         </View>
@@ -372,7 +459,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   if (profiles.length === 0 || currentIndex >= profiles.length) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]}>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>No more profiles nearby</Text>
           <Text style={styles.subText}>Check back later for new matches</Text>
@@ -383,7 +470,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   // MAIN RENDER
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <TouchableOpacity 
           hitSlop={HIT_SLOP}
@@ -512,38 +599,45 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       </View>
 
       <View style={styles.actionContainer}>
+        {/* Undo button */}
         <TouchableOpacity
-          style={[styles.navButton, styles.previousButton]}
-          onPress={goToPrevious}
-          disabled={currentIndex === 0}
+          style={[styles.actionBtn, styles.undoBtn, !lastDisliked && styles.actionBtnDisabled]}
+          onPress={handleUndo}
+          disabled={!lastDisliked}
           hitSlop={HIT_SLOP}
         >
-          <Ionicons 
-            name="chevron-back" 
-            size={responsiveIconSizes.actionLarge} 
-            color={currentIndex === 0 ? COLORS.textLight : COLORS.text} 
-          />
+          <Ionicons name="arrow-undo" size={22} color={lastDisliked ? COLORS.warning : COLORS.textLight} />
         </TouchableOpacity>
 
+        {/* Dislike */}
         <TouchableOpacity
-          style={[styles.likeButton]}
+          style={[styles.actionBtn, styles.dislikeBtn]}
+          onPress={handleDislike}
+          hitSlop={HIT_SLOP}
+        >
+          <Ionicons name="close" size={responsiveIconSizes.actionLarge} color={COLORS.error} />
+        </TouchableOpacity>
+
+        {/* Like */}
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.likeBtn]}
           onPress={handleLike}
           hitSlop={HIT_SLOP}
         >
           <Ionicons name="heart" size={responsiveIconSizes.actionLarge} color={COLORS.white} />
         </TouchableOpacity>
 
+        {/* Super like */}
         <TouchableOpacity
-          style={[styles.navButton, styles.nextButton]}
-          onPress={goToNext}
-          disabled={currentIndex === profiles.length - 1}
+          style={[styles.actionBtn, styles.superLikeBtn]}
+          onPress={async () => {
+            if (!currentProfile) return;
+            try { await api.swipe(currentProfile.id, 'SUPERLIKE'); } catch {}
+            goToNext();
+          }}
           hitSlop={HIT_SLOP}
         >
-          <Ionicons 
-            name="chevron-forward" 
-            size={responsiveIconSizes.actionLarge} 
-            color={currentIndex === profiles.length - 1 ? COLORS.textLight : COLORS.text} 
-          />
+          <Ionicons name="star" size={22} color={COLORS.info} />
         </TouchableOpacity>
       </View>
 
@@ -552,6 +646,37 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           {currentIndex + 1} of {profiles.length}
         </Text>
       </View>
+
+      {/* Match Modal */}
+      {matchModal.profile && myProfile && (
+        <MatchModal
+          visible={matchModal.visible}
+          myProfile={myProfile}
+          matchedProfile={{
+            id: matchModal.profile.id,
+            name: matchModal.profile.name,
+            age: matchModal.profile.age,
+            photo: matchModal.profile.photos[0],
+            interests: matchModal.profile.interests,
+            compatibility: matchModal.profile.compatibility,
+            bio: matchModal.profile.bio,
+          }}
+          suggestions={profiles
+            .filter(p => p.id !== matchModal.profile!.id && p.id !== currentProfile?.id)
+            .slice(0, 4)
+            .map(p => ({ id: p.id, name: p.name, photo: p.photos[0], compatibility: p.compatibility }))}
+          onSendMessage={() => {
+            const { profile, matchId } = matchModal;
+            setMatchModal({ visible: false, profile: null, matchId: null });
+            if (matchId && profile) {
+              navigation.navigate('Chat', { matchId, name: profile.name });
+            } else {
+              navigation.navigate('Messages');
+            }
+          }}
+          onKeepSwiping={() => setMatchModal({ visible: false, profile: null, matchId: null })}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -756,33 +881,43 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: SPACING.lg,
-    gap: SPACING.xl,
+    gap: SPACING.md,
   },
-  navButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: COLORS.white,
+  actionBtn: {
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.full,
     ...SHADOWS.medium,
   },
-  previousButton: {
-    borderWidth: 2,
-    borderColor: COLORS.border,
+  actionBtnDisabled: {
+    opacity: 0.35,
   },
-  nextButton: {
-    borderWidth: 2,
-    borderColor: COLORS.border,
+  undoBtn: {
+    width: 48,
+    height: 48,
+    backgroundColor: COLORS.white,
+    borderWidth: 1.5,
+    borderColor: COLORS.warning,
   },
-  likeButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: COLORS.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.large,
+  dislikeBtn: {
+    width: 64,
+    height: 64,
+    backgroundColor: COLORS.white,
+    borderWidth: 2,
+    borderColor: COLORS.error,
+  },
+  likeBtn: {
+    width: 76,
+    height: 76,
+    backgroundColor: COLORS.primary,
+    ...SHADOWS.glow,
+  },
+  superLikeBtn: {
+    width: 48,
+    height: 48,
+    backgroundColor: COLORS.white,
+    borderWidth: 1.5,
+    borderColor: COLORS.info,
   },
   counterContainer: {
     alignItems: 'center',

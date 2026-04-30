@@ -26,7 +26,7 @@ type IDVerificationScreenProps = {
 };
 
 type Step = 'id_upload' | 'id_back' | 'verifying' | 'success';
-type IDType = 'passport' | 'drivers_license' | 'national_id';
+type IDType = 'national_id';
 
 export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
   navigation,
@@ -44,7 +44,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
   const [gender, setGender] = useState<'MALE' | 'FEMALE' | ''>(formData?.gender || '');
   
   // ID details
-  const [idType, setIdType] = useState<IDType | null>(null);
+  const [idType, setIdType] = useState<IDType>('national_id');
   const [idFrontImage, setIdFrontImage] = useState<string | null>(null);
   const [idBackImage, setIdBackImage] = useState<string | null>(null);
   const [extractedData, setExtractedData] = useState<ExtractedDocumentData | null>(null);
@@ -163,18 +163,13 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
   const validateID = () => {
     const newErrors: Record<string, string> = {};
-    if (!idType) newErrors.idType = 'Please select an ID type';
-    if (!idFrontImage) newErrors.idImage = 'Please upload your ID';
+    if (!idFrontImage) newErrors.idImage = 'Please upload your National ID';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const validateBackImage = () => {
-    if (idType === 'drivers_license' && !idBackImage) {
-      setErrors({ idBackImage: 'Please upload the back of your license' });
-      return false;
-    }
-    return true;
+    return true; // National ID only needs front
   };
 
   const handleContinue = async () => {
@@ -264,12 +259,8 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       idFrontImage,
     });
 
-    // If not driver's license, process directly
-    if (idType !== 'drivers_license') {
-      await processFrontImage();
-    } else {
-      setStep('id_back');
-    }
+    // National ID only needs front — process directly
+    await processFrontImage();
   };
 
   const handleProceedFromBack = async () => {
@@ -311,21 +302,67 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
         throw new Error('Document image or ID type is missing');
       }
 
-      const extractedText = await documentVerificationService.extractTextFromImage(idFrontImage);
-      
-      let parsedData;
+      const ocrResult = await documentVerificationService.extractTextFromImage(idFrontImage);
+
+      // Server rejected the image due to low quality
+      if (ocrResult.error) {
+        Alert.alert(
+          'Photo Quality Too Low',
+          ocrResult.error,
+          [{ text: 'Retake Photo', onPress: handleRetryOCR }]
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      const extractedText = ocrResult.text;
+
       if (!extractedText || !extractedText.trim()) {
-        // OCR failed or returned empty - use user-entered data as fallback
-        console.log('OCR returned no text, using user-entered data as fallback');
-        parsedData = {
-          documentType: idType,
-          firstName: firstName.toUpperCase(),
-          lastName: lastName.toUpperCase(),
-          dateOfBirth: normalizeDate(dateOfBirth) || dateOfBirth,
-          rawText: 'User-entered data fallback (OCR unavailable)',
-        };
-      } else {
-        parsedData = documentVerificationService.parseDocumentText(extractedText, idType);
+        Alert.alert(
+          'Document Could Not Be Read',
+          'We were unable to extract any text from your ID. Please:\n\n• Ensure the full ID is visible\n• Use good lighting with no glare\n• Hold the camera steady\n• Make sure the text is in focus',
+          [{ text: 'Try Again', onPress: handleRetryOCR }]
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // Check if the scanned image is actually the front of an ID
+      const upperText = extractedText.toUpperCase();
+      const hasSurname   = /SURNAME|FIRST\s*NAME/.test(upperText);
+      const hasIdNumber  = /ID\s*NUMBER|PASSPORT|LICENCE|LICENSE/.test(upperText);
+      const hasCountry   = /REPUBLIC|ZIMBABWE|NATIONAL\s*REGISTRATION|NATIONAL\s*ID/.test(upperText);
+      const hasDate      = /\d{2}[\/\-]\d{2}[\/\-]\d{4}/.test(upperText);
+      const hasAnyIdText = /REGISTRATION|IDENTITY|CITIZEN|BIRTH|GENDER|VILLAGE|HARARE|BULAWAYO/.test(upperText);
+      const looksLikeIdFront = hasSurname || hasIdNumber || hasCountry || (hasDate && hasAnyIdText);
+
+      if (!looksLikeIdFront) {
+        Alert.alert(
+          'Wrong Side of ID',
+          'It looks like you may have scanned the back of your ID, or the image is not clear enough to read.\n\nPlease scan the FRONT of your ID — the side that shows your name, photo and date of birth.',
+          [{ text: 'Try Again', onPress: handleRetryOCR }]
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      const parsedData = documentVerificationService.parseDocumentText(extractedText, idType);
+
+      // Require that OCR returned readable text — name extraction is done server-side
+      // using rawText, so we don't need client-side name parsing to succeed
+      const hasIdContent = (parsedData.rawText || '').toUpperCase().includes('ZIMBABWE') ||
+        (parsedData.rawText || '').toUpperCase().includes('REPUBLIC') ||
+        (parsedData.rawText || '').toUpperCase().includes('SURNAME') ||
+        (parsedData.rawText || '').toUpperCase().includes('NATIONAL');
+
+      if (!hasIdContent) {
+        Alert.alert(
+          'Name Could Not Be Verified',
+          'We could read some text from your ID but could not find your name. Please:\n\n• Ensure the name section is clearly visible and in focus\n• Remove any glare or shadows over the text\n• Try a different angle',
+          [{ text: 'Try Again', onPress: handleRetryOCR }]
+        );
+        setIsLoading(false);
+        return;
       }
       setExtractedData(parsedData);
 
@@ -419,6 +456,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
           firstName: docData?.firstName,
           lastName: docData?.lastName,
           fullName: docData?.fullName,
+          rawText: docData?.rawText, // send full OCR text for server-side matching
           dateOfBirth: docData?.dateOfBirth || '',
           registrationFirstName: firstName,
           registrationLastName: lastName,
@@ -427,7 +465,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
           nationality: docData?.nationality,
           gender: docData?.gender || (gender || undefined),
           address: docData?.address,
-          confidence: docData?.documentNumber ? 80 : 50,
+          confidence: docData?.documentNumber ? 80 : 75,
         });
       } catch (backendError: any) {
         // If backend is unavailable, allow verification to proceed with local validation only
@@ -474,24 +512,29 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       
       console.log('Raw docData:', JSON.stringify(docData, null, 2));
       console.log('=== END DEBUG ===');
-      
-      const strictNameMatch =
-        normalizedExtracted !== '' &&
-        normalizedExtracted === normalizedEntered;
-      const strictDobMatch =
-        normalizedExtractedDob !== '' &&
-        normalizedExtractedDob === normalizedEnteredDob;
 
-      if (!strictNameMatch || !strictDobMatch) {
-        Alert.alert(
-          'Verification Failed',
-          'The full name and date of birth must match your ID exactly before you can continue.',
-          [{ text: 'Try Again', onPress: handleRetryOCR }]
-        );
-        return;
-      }
+      // Use rawText for name matching — it contains the original OCR output
+      // before normalization which may have split words
+      const rawOcrText = normalizeName(docData?.rawText || '');
+      const allOcrNameText = rawOcrText || normalizeName(
+        `${docData?.firstName || ''} ${docData?.lastName || ''} ${docData?.fullName || ''}`
+      );
+      const enteredFirstName = normalizeName(firstName);
+      const enteredLastName  = normalizeName(lastName);
 
+      // Check if names appear in OCR text — use includes for exact match
+      // or check if OCR text contains the name without spaces (handles "MIKITA YO" = "MIKITAYO")
+      const nameInOcr = (name: string, ocrText: string): boolean => {
+        if (!name || !ocrText) return false;
+        if (ocrText.includes(name)) return true;
+        // Also check without spaces in case OCR split the word
+        const ocrNoSpaces = ocrText.replace(/\s/g, '');
+        return ocrNoSpaces.includes(name.replace(/\s/g, ''));
+      };
+
+      // Check server response first - server has more sophisticated matching logic
       if (backendResult.success) {
+        // Server validated successfully - trust the server's decision
         setStep('success');
         const identityFingerprint = await buildIdentityFingerprint(docData);
         
@@ -527,7 +570,11 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
           });
         }, 1500);
       } else {
-        const errorMessage = backendResult.errors?.join('\n') || 'Could not verify your ID. Please try again.';
+        // Server rejected - show the server's error message
+        const errorMessage = backendResult.errors?.join('\n') || 
+          backendResult.message ||
+          'Could not verify your ID. Please ensure your details match your ID exactly and try again.';
+        
         Alert.alert(
           'Verification Failed',
           errorMessage,
@@ -573,8 +620,6 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
   };
 
   const idTypes: { type: IDType; label: string; icon: keyof typeof Ionicons.glyphMap; requiresBack: boolean }[] = [
-    { type: 'passport', label: 'Passport', icon: 'document', requiresBack: false },
-    { type: 'drivers_license', label: "Driver's License", icon: 'car', requiresBack: true },
     { type: 'national_id', label: 'National ID', icon: 'card', requiresBack: false },
   ];
 
@@ -641,31 +686,12 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
   const renderIdUploadStep = () => (
     <View style={styles.form}>
-      <Text style={styles.label}>Select ID Type</Text>
-      <View style={styles.idTypeOptions}>
-        {idTypes.map((item) => (
-          <TouchableOpacity
-            key={item.type}
-            style={[styles.idTypeOption, idType === item.type && styles.idTypeSelected]}
-            onPress={() => setIdType(item.type)}
-          >
-            <Ionicons 
-              name={item.icon} 
-              size={24} 
-              color={idType === item.type ? COLORS.primary : COLORS.textSecondary} 
-            />
-            <Text style={[styles.idTypeText, idType === item.type && styles.idTypeTextSelected]}>
-              {item.label}
-            </Text>
-            {item.requiresBack && (
-              <Text style={styles.requiresBackText}>+ Back</Text>
-            )}
-          </TouchableOpacity>
-        ))}
+      <View style={styles.idTypeBadge}>
+        <Ionicons name="card" size={22} color={COLORS.primary} />
+        <Text style={styles.idTypeBadgeText}>National ID</Text>
       </View>
-      {errors.idType && <Text style={styles.error}>{errors.idType}</Text>}
 
-      <Text style={styles.label}>Upload ID Front</Text>
+      <Text style={styles.label}>Upload Front of National ID</Text>
       <View style={styles.uploadButtons}>
         <TouchableOpacity style={styles.uploadButton} onPress={() => showImagePicker('front')}>
           <Ionicons name="images-outline" size={32} color={COLORS.primary} />
@@ -693,12 +719,12 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       <View style={styles.infoBox}>
         <Ionicons name="information-circle" size={20} color={COLORS.info} />
         <Text style={styles.infoText}>
-          Take a clear photo of your {idType === 'drivers_license' ? 'license' : 'document'}. Ensure all text is readable and well-lit.
+          Take a clear photo of the front of your National ID. Ensure your name, date of birth and ID number are fully visible and well-lit.
         </Text>
       </View>
 
       <Button 
-        title={idType === 'drivers_license' ? 'Continue to Back' : 'Verify My ID'} 
+        title="Verify My ID"
         onPress={handleProceedToBack} 
         loading={isLoading}
         disabled={!idFrontImage}
@@ -844,6 +870,24 @@ const styles = StyleSheet.create({
   uploadButtons: { flexDirection: 'row', gap: SPACING.md },
   uploadButton: { flex: 1, padding: SPACING.xl, borderRadius: 12, borderWidth: 2, borderColor: COLORS.primary, borderStyle: 'dashed', alignItems: 'center' },
   uploadButtonText: { fontSize: FONTS.sizes.sm, color: COLORS.primary, marginTop: SPACING.sm },
+  idTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.primarySoft,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.full,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    alignSelf: 'flex-start',
+    marginBottom: SPACING.lg,
+  },
+  idTypeBadgeText: {
+    fontSize: FONTS.sizes.md,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
   
   previewContainer: { marginTop: SPACING.md, position: 'relative' },
   preview: { width: '100%', height: 200, borderRadius: 12, resizeMode: 'cover' },

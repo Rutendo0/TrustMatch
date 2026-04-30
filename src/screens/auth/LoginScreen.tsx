@@ -14,6 +14,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Input } from '../../components/common';
 import { api } from '../../services/api';
+import { socketService } from '../../services/socketService';
 import { registrationProgress } from '../../services/RegistrationProgressService';
 import { COLORS, FONTS, SPACING } from '../../constants/theme';
 
@@ -70,6 +71,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       
       // Clear any saved registration progress since user is now logged in
       await registrationProgress.clearProgress();
+
+      // Connect socket with the fresh token
+      await socketService.connect();
       
       // Navigate to main app on success
       navigation.reset({

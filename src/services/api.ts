@@ -2,6 +2,23 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { registrationProgress } from './RegistrationProgressService';
 
+// Lightweight event emitter — React Native can't use Node's 'events' module
+type Listener = () => void;
+class SimpleEmitter {
+  private listeners: Record<string, Listener[]> = {};
+  on(event: string, fn: Listener) {
+    if (!this.listeners[event]) this.listeners[event] = [];
+    this.listeners[event].push(fn);
+  }
+  off(event: string, fn: Listener) {
+    this.listeners[event] = (this.listeners[event] || []).filter(l => l !== fn);
+  }
+  emit(event: string) {
+    (this.listeners[event] || []).forEach(fn => fn());
+  }
+}
+export const authEventEmitter = new SimpleEmitter();
+
 
 // Use environment variable or default to localhost for development
 // For production, set EXPO_PUBLIC_API_URL in your environment
@@ -41,17 +58,56 @@ class ApiService {
 
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError) => {
-        // Don't retry on 401 - just reject the error
-        // Let each request handle its own auth errors
+      async (error: AxiosError) => {
+        // Global 401 handler — only force logout if we actually had a token.
+        // A 401 with no token just means an unauthenticated request (e.g. during
+        // registration flow) — don't redirect to Welcome in that case.
+        if (error.response?.status === 401 && this.token) {
+          this.token = null;
+          try {
+            await SecureStore.deleteItemAsync('authToken');
+            await registrationProgress.clearProgress();
+          } catch {}
+          authEventEmitter.emit('unauthorized');
+        }
         return Promise.reject(error);
       }
     );
   }
 
-  async init() {
+async init() {
     try {
-      this.token = await SecureStore.getItemAsync('authToken');
+      const storedToken = await SecureStore.getItemAsync('authToken');
+      if (storedToken) {
+        // Check if token looks valid (basic JWT format: header.payload.signature)
+        const parts = storedToken.split('.');
+        if (parts.length !== 3) {
+          // Invalid JWT format - clear it
+          console.warn('[API] Invalid token format in storage, clearing...');
+          await SecureStore.deleteItemAsync('authToken');
+          this.token = null;
+        } else {
+          // Try to decode the payload to check if it's expired
+          try {
+            const payload = JSON.parse(atob(parts[1]));
+            const now = Math.floor(Date.now() / 1000);
+            
+            // If token is expired, clear it
+            if (payload.exp && payload.exp < now) {
+              console.warn('[API] Token expired, clearing...');
+              await SecureStore.deleteItemAsync('authToken');
+              this.token = null;
+            } else {
+              this.token = storedToken;
+            }
+          } catch (decodeError) {
+            // If we can't decode the token, it's invalid - clear it
+            console.warn('[API] Could not decode token, clearing...');
+            await SecureStore.deleteItemAsync('authToken');
+            this.token = null;
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to load token:', error);
     }
@@ -134,6 +190,11 @@ class ApiService {
     return response.data;
   }
 
+  async getPhotos() {
+    const response = await this.client.get('/users/photos');
+    return response.data; // array of { id, url, order, isMain }
+  }
+
   async uploadSelfie(imageUri: string) {
     const formData = new FormData();
     formData.append('selfie', {
@@ -190,6 +251,7 @@ class ApiService {
     firstName?: string;
     lastName?: string;
     fullName?: string;
+    rawText?: string;
     dateOfBirth: string;
     registrationFirstName?: string;
     registrationLastName?: string;
@@ -221,6 +283,11 @@ class ApiService {
 
   async getProfile() {
     const response = await this.client.get('/users/me');
+    return response.data;
+  }
+
+  async getUserById(userId: string) {
+    const response = await this.client.get(`/users/${userId}`);
     return response.data;
   }
 
@@ -261,7 +328,6 @@ async getProfileInsights() {
   async updatePreferences(data: {
     ageRangeMin?: number;
     ageRangeMax?: number;
-    maxDistance?: number;
     interestedIn?: string;
   }) {
     const response = await this.client.put('/users/preferences', data);
@@ -272,7 +338,6 @@ async getProfileInsights() {
     gender?: string;
     ageMin?: number;
     ageMax?: number;
-    distance?: number;
   }) {
     const params: any = { limit };
     if (filters) {
@@ -281,7 +346,6 @@ async getProfileInsights() {
       }
       if (filters.ageMin) params.ageMin = filters.ageMin;
       if (filters.ageMax) params.ageMax = filters.ageMax;
-      if (filters.distance) params.distance = filters.distance;
     }
     const response = await this.client.get('/users/discover', { params });
     return response.data;
@@ -307,6 +371,22 @@ async getProfileInsights() {
 
   async getSentLikes() {
     const response = await this.client.get('/matches/sent-likes');
+    return response.data;
+  }
+
+  async undoSwipe(targetUserId: string) {
+    // Find and delete the swipe
+    const response = await this.client.delete(`/matches/swipe/${targetUserId}`);
+    return response.data;
+  }
+
+  async getPassed() {
+    const response = await this.client.get('/matches/passed');
+    return response.data;
+  }
+
+  async removePass(swipeId: string) {
+    const response = await this.client.delete(`/matches/passed/${swipeId}`);
     return response.data;
   }
 
@@ -466,6 +546,19 @@ async getProfileInsights() {
     if (limit) params.limit = limit;
     if (offset) params.offset = offset;
     const response = await this.client.get('/users/me/live-verification/history', { params });
+    return response.data;
+  }
+
+  async changePassword(currentPassword: string, newPassword: string) {
+    const response = await this.client.post('/auth/change-password', {
+      currentPassword,
+      newPassword,
+    });
+    return response.data;
+  }
+
+  async deleteAccount() {
+    const response = await this.client.delete('/users/me');
     return response.data;
   }
 }

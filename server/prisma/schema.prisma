@@ -469,6 +469,9 @@ enum ReportStatus {
 
 enum UserStatus {
   PENDING
+  PENDING_ONBOARDING
   ACTIVE
   SUSPENDED
+  BANNED
+  DELETED
 }

@@ -13,6 +13,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as SecureStore from 'expo-secure-store';
 import { Button } from '../../components/common';
 import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
@@ -27,6 +29,7 @@ type PhotoUploadScreenProps = {
 interface Photo {
   uri: string;
   id: string;
+  uploaded?: boolean; // true = already on server, skip re-upload
 }
 
 export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
@@ -39,18 +42,32 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
   const [isRegistering, setIsRegistering] = useState(false);
   const deviceFingerprint = useDeviceFingerprint();
 
-  // Load saved progress on mount
+  // Load saved progress on mount — prefer server photos to avoid re-uploads
   useEffect(() => {
     const loadProgress = async () => {
-      const progress = await registrationProgress.getProgress();
-      if (progress && progress.formData) {
-        // Restore saved photos if any
-        if (progress.formData.photos && progress.formData.photos.length > 0) {
-          setPhotos(progress.formData.photos.map((uri: string, index: number) => ({
-            uri,
-            id: `restored_${index}`,
+      try {
+        // First check if user already has photos on the server
+        const serverPhotos = await api.getPhotos();
+        if (serverPhotos && serverPhotos.length > 0) {
+          setPhotos(serverPhotos.map((p: any) => ({
+            uri: p.url,
+            id: p.id,
+            uploaded: true, // already on server — don't re-upload
           })));
+          return;
         }
+      } catch {
+        // Not logged in yet or no photos — fall through to local progress
+      }
+
+      // Fall back to locally saved progress (new registration, not yet uploaded)
+      const progress = await registrationProgress.getProgress();
+      if (progress?.formData?.photos?.length > 0) {
+        setPhotos(progress.formData.photos.map((uri: string, index: number) => ({
+          uri,
+          id: `restored_${index}`,
+          uploaded: false,
+        })));
       }
     };
     loadProgress();
@@ -62,44 +79,44 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       return;
     }
 
+    if (photos.length < 3) {
+      Alert.alert('Minimum Photos Required', 'Please upload at least 3 photos to continue.');
+      return;
+    }
+
     try {
       setIsRegistering(true);
-      
-      // Register the user in the backend after ID verification passed
-      // Use gender from formData or extracted from ID document
-      const userGender = formData?.gender || formData?.extractedData?.gender;
-      await api.register({
-        email: formData?.email,
-        phone: formData?.phone,
-        password: formData?.password,
 
-        firstName: formData?.firstName,
-        lastName: formData?.lastName,
-        dateOfBirth: formData?.dateOfBirth,
-        gender: userGender || 'MALE',
-        interestedIn: userGender === 'MALE' ? 'FEMALE' : 'MALE',
-        deviceFingerprint: deviceFingerprint.fingerprint || 'unknown',
-        identityFingerprint: formData?.identityFingerprint,
-        platform: 'mobile',
-      });
+      // Ensure we have an auth token
+      try {
+        const token = await SecureStore.getItemAsync('authToken');
+        if (!token && formData?.email && formData?.password) {
+          await api.login(formData.email, formData.password);
+        }
+      } catch (authErr) {
+        console.log('Auth check failed, continuing:', authErr);
+      }
 
-      // Upload profile photos to server (token is now set after register)
-      for (const photo of photos) {
+      // Only upload photos that haven't been uploaded yet
+      const newPhotos = photos.filter(p => !p.uploaded);
+      for (const photo of newPhotos) {
         try {
           await api.uploadProfilePhoto(photo.uri);
         } catch (uploadError: any) {
           console.error('Photo upload error:', uploadError?.response?.data || uploadError?.message);
-          // Continue — don't block registration if one photo fails
         }
       }
 
       navigation.navigate('SelfieVerification', {
-        formData: { ...formData, photos: photos.map(p => p.uri) }
+        formData: { ...formData, photos: photos.map(p => p.uri) },
+        idFrontImage: formData?.idFrontImage,
+        idBackImage: formData?.idBackImage,
+        profilePhotos: photos.map(p => p.uri),
       });
     } catch (error: any) {
-      console.error('Registration error full:', error?.response?.data || error);
-      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to create account. Please try again.';
-      Alert.alert('Registration Error', errorMessage);
+      console.error('Photo upload error:', error?.response?.data || error);
+      const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error?.message || 'Failed to upload photos. Please try again.';
+      Alert.alert('Upload Error', errorMessage);
     } finally {
       setIsRegistering(false);
     }
@@ -121,54 +138,40 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
     });
 
     if (!result.canceled) {
-      const newPhoto: Photo = {
-        uri: result.assets[0].uri,
-        id: Date.now().toString(),
-      };
-      
-      if (photos.length < 6) {
-        const newPhotos = [...photos, newPhoto];
-        setPhotos(newPhotos);
-        // Save progress
-        await registrationProgress.saveProgress('photos', {
-          ...formData,
-          photos: newPhotos.map(p => p.uri),
-        });
-      } else {
-        Alert.alert('Maximum Photos', 'You can only upload up to 6 photos.');
+      try {
+        // Compress image to max 1MB before adding to state
+        const compressedImage = await ImageManipulator.manipulateAsync(
+          result.assets[0].uri,
+          [{ resize: { width: 1080 } }], // resize to 1080px width, maintain aspect ratio
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+        );
+
+        const newPhoto: Photo = {
+          uri: compressedImage.uri,
+          id: Date.now().toString(),
+          uploaded: false, // new — needs uploading
+        };
+        
+        if (photos.length < 6) {
+          const newPhotos = [...photos, newPhoto];
+          setPhotos(newPhotos);
+          // Save progress
+          await registrationProgress.saveProgress('photos', {
+            ...formData,
+            photos: newPhotos.map(p => p.uri),
+          });
+        } else {
+          Alert.alert('Maximum Photos', 'You can only upload up to 6 photos.');
+        }
+      } catch (error) {
+        console.error('Image compression error:', error);
+        Alert.alert('Error', 'Failed to process image. Please try another photo.');
       }
     }
   };
 
   const removePhoto = (id: string) => {
     setPhotos(photos.filter(photo => photo.id !== id));
-  };
-
-  const handleNext = async () => {
-    if (photos.length < 3) {
-      Alert.alert('Minimum Photos Required', 'Please upload at least 3 photos to continue.');
-      return;
-    }
-
-    setIsUploading(true);
-    
-    // Save progress before moving to selfie
-    await registrationProgress.saveProgress('selfie', {
-      ...formData,
-      photos: photos.map(p => p.uri),
-    });
-    
-    // Simulate photo processing
-    setTimeout(() => {
-      setIsUploading(false);
-      // Pass all photos for comprehensive face matching
-      navigation.navigate('SelfieVerification', { 
-        formData: { ...formData, photos: photos.map(p => p.uri) },
-        idFrontImage: formData?.idFrontImage,
-        idBackImage: formData?.idBackImage,
-        profilePhotos: photos.map(p => p.uri),
-      });
-    }, 2000);
   };
 
   const renderPhotoSlot = () => {
@@ -233,6 +236,15 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
           <Text style={styles.subtitle}>
             Upload 3-6 photos that represent you. Your first photo will be your main profile picture.
           </Text>
+
+          {/* Important note about first photo */}
+          <View style={styles.importantNote}>
+            <Ionicons name="information-circle" size={20} color={COLORS.primary} />
+            <Text style={styles.importantNoteText}>
+              <Text style={styles.importantNoteLabel}>Important: </Text>
+              The first photo you add will be used as your profile picture — make sure it's a clear, well-lit photo of your face.
+            </Text>
+          </View>
         </View>
 
         <View style={styles.photoGrid}>
@@ -319,7 +331,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
   },
   titleSection: {
-    alignItems: 'center',
     paddingVertical: SPACING.xl,
   },
   title: {
@@ -392,6 +403,27 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     marginTop: SPACING.xs,
     textAlign: 'center',
+  },
+  importantNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.primarySoft,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  importantNoteText: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text,
+    lineHeight: 20,
+  },
+  importantNoteLabel: {
+    fontWeight: '700',
+    color: COLORS.primary,
   },
   tipsSection: {
     backgroundColor: COLORS.background,

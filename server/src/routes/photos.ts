@@ -39,26 +39,30 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/users/photos — upload a new photo
-router.post('/', upload.single('photo'), async (req: AuthRequest, res: Response) => {
+router.post('/', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
 
-    if (!req.file) {
-      throw new AppError('No photo uploaded', 400);
-    }
-
+    // Check limit BEFORE uploading to Cloudinary
     const existingCount = await prisma.photo.count({ where: { userId } });
     if (existingCount >= MAX_PHOTOS) {
-      // Delete uploaded file from Cloudinary
-      if (req.file.path) {
-        const publicId = req.file.path.replace(/.*\//, '').replace(/\.[^.]+$/, '');
-        await cloudinary.uploader.destroy(`trustmatch/photos/${publicId}`);
-      }
-      throw new AppError(`Maximum of ${MAX_PHOTOS} photos allowed`, 400);
+      return res.status(400).json({ error: `Maximum of ${MAX_PHOTOS} photos allowed` });
+    }
+
+    // Only upload after limit check passes
+    await new Promise<void>((resolve, reject) => {
+      upload.single('photo')(req as any, res as any, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No photo uploaded' });
     }
 
     const isFirst = existingCount === 0;
-    
+
     // Get the Cloudinary URL
     const photoUrl = (req.file as any).path || req.file.filename;
 
@@ -72,9 +76,11 @@ router.post('/', upload.single('photo'), async (req: AuthRequest, res: Response)
     });
 
     res.status(201).json(photo);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Upload photo error:', error);
-    res.status(500).json({ error: 'Failed to upload photo' });
+    // Propagate AppError status codes correctly
+    const status = error instanceof AppError ? error.statusCode : 500;
+    res.status(status).json({ error: error.message || 'Failed to upload photo' });
   }
 });
 
@@ -122,9 +128,10 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
     }
 
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Delete photo error:', error);
-    res.status(500).json({ error: 'Failed to delete photo' });
+    const status = error instanceof AppError ? error.statusCode : 500;
+    res.status(status).json({ error: error.message || 'Failed to delete photo' });
   }
 });
 
@@ -164,9 +171,10 @@ router.put('/reorder', async (req: AuthRequest, res: Response) => {
     });
 
     res.json(updated);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Reorder photos error:', error);
-    res.status(500).json({ error: 'Failed to reorder photos' });
+    const status = error instanceof AppError ? error.statusCode : 500;
+    res.status(status).json({ error: error.message || 'Failed to reorder photos' });
   }
 });
 

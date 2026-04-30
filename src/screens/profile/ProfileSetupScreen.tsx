@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from '../../components/common';
+import { Button, AgeRangeInput } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 
 type ProfileSetupScreenProps = {
@@ -106,14 +106,20 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
   const [aboutMe, setAboutMe] = useState('');
   const [city, setCity] = useState('');
   const [country, setCountry] = useState('');
+  const [additionalCity1, setAdditionalCity1] = useState('');
+  const [additionalCity2, setAdditionalCity2] = useState('');
   const [currentStep, setCurrentStep] = useState(0);
+
+  // Emergency contact
+  const [emergencyName, setEmergencyName] = useState('');
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [emergencyRelation, setEmergencyRelation] = useState('');
   
-  // Discovery preferences - set your default range
+  // Discovery preferences
   const [preferredAgeMin, setPreferredAgeMin] = useState(21);
   const [preferredAgeMax, setPreferredAgeMax] = useState(50);
-  const [preferredMaxDistance, setPreferredMaxDistance] = useState(25);
 
-  const steps = ['About You', 'Interests & Hobbies', 'Preferences', 'Goals & Values'];
+  const steps = ['About You', 'Interests & Hobbies', 'Preferences', 'Goals & Values', 'Safety First'];
 
   const toggleInterest = (interestId: string, interestName?: string) => {
     // Handle custom interest "Other" button
@@ -182,6 +188,16 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
           country,
           interests: allInterests,
         });
+
+        // Save emergency contact to SecureStore locally
+        if (emergencyName && emergencyPhone) {
+          const { default: SecureStore } = await import('expo-secure-store');
+          await SecureStore.setItemAsync('emergency_contact', JSON.stringify({
+            name: emergencyName,
+            phone: emergencyPhone,
+            relation: emergencyRelation,
+          }));
+        }
         
         // Save discovery preferences
         const interestedInMap: Record<string, string> = {
@@ -206,7 +222,6 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
         await api.updatePreferences({
           ageRangeMin: preferredAgeMin,
           ageRangeMax: preferredAgeMax,
-          maxDistance: preferredMaxDistance,
           interestedIn,
         });
         
@@ -255,6 +270,8 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
         return education.length > 0;
       case 3:
         return relationshipGoal.length > 0;
+      case 4:
+        return true; // Safety step is optional — can always proceed
       default:
         return true;
     }
@@ -430,72 +447,43 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Preferred Age Range</Text>
               <Text style={styles.inputSubtext}>Set your default preference for matches</Text>
-              <View style={styles.ageRangeInputs}>
-                <View style={styles.ageInputContainer}>
-                  <Text style={styles.ageInputLabel}>Min Age</Text>
-                  <TextInput
-                    style={styles.ageInput}
-                    value={String(preferredAgeMin)}
-                    onChangeText={(text) => {
-                      // Allow typing any number, clamp only when valid and complete
-                      const num = parseInt(text.replace(/[^0-9]/g, ''), 10);
-                      if (!isNaN(num) && num <= 99) {
-                        setPreferredAgeMin(num);
-                      } else if (text === '') {
-                        setPreferredAgeMin(18); // Reset to minimum when cleared
-                      }
-                    }}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    placeholder="21"
-                    editable={true}
-                    selectTextOnFocus
-                  />
-                </View>
-                <Text style={styles.ageRangeSeparator}>to</Text>
-                <View style={styles.ageInputContainer}>
-                  <Text style={styles.ageInputLabel}>Max Age</Text>
-                  <TextInput
-                    style={styles.ageInput}
-                    value={String(preferredAgeMax)}
-                    onChangeText={(text) => {
-                      // Allow typing any number, clamp only when valid and complete
-                      const num = parseInt(text.replace(/[^0-9]/g, ''), 10);
-                      if (!isNaN(num) && num <= 99) {
-                        setPreferredAgeMax(num);
-                      } else if (text === '') {
-                        setPreferredAgeMax(50); // Reset to default when cleared
-                      }
-                    }}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    placeholder="50"
-                    editable={true}
-                    selectTextOnFocus
-                  />
-                </View>
-              </View>
+              <AgeRangeInput
+                minAge={preferredAgeMin}
+                maxAge={preferredAgeMax}
+                onMinChange={setPreferredAgeMin}
+                onMaxChange={setPreferredAgeMax}
+                minLimit={18}
+              />
+              <Text style={styles.ageHint}>Minimum age is 18 years</Text>
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Maximum Distance (km)</Text>
+              <Text style={styles.inputLabel}>Location Matching</Text>
+              <Text style={styles.inputSubtext}>
+                Enter cities where you want to find matches. Your current city is required — add up to 2 more.
+              </Text>
+
+              <Text style={styles.cityFieldLabel}>📍 Additional City 1</Text>
+              <TextInput
+                style={[styles.textInput, { marginBottom: SPACING.sm }]}
+                placeholder="e.g. Bulawayo"
+                value={additionalCity1}
+                onChangeText={setAdditionalCity1}
+                autoCapitalize="words"
+              />
+
+              <Text style={styles.cityFieldLabel}>🏙️ Additional City 2</Text>
               <TextInput
                 style={styles.textInput}
-                value={String(preferredMaxDistance)}
-                onChangeText={(text) => {
-                  // Allow typing any number, clamp only when valid and complete
-                  const num = parseInt(text.replace(/[^0-9]/g, ''), 10);
-                  if (!isNaN(num) && num <= 500) {
-                    setPreferredMaxDistance(num);
-                  } else if (text === '') {
-                    setPreferredMaxDistance(25); // Reset to default when cleared
-                  }
-                }}
-                keyboardType="number-pad"
-                placeholder="25"
-                editable={true}
-                selectTextOnFocus
+                placeholder="e.g. Mutare"
+                value={additionalCity2}
+                onChangeText={setAdditionalCity2}
+                autoCapitalize="words"
               />
+
+              <Text style={styles.locationHint}>
+                You'll be matched with people in your current city and any cities you add here.
+              </Text>
             </View>
           </View>
         );
@@ -532,6 +520,96 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
                 </TouchableOpacity>
               ))}
             </View>
+          </View>
+        );
+
+      case 4:
+        return (
+          <View style={styles.stepContent}>
+            {/* Safety First header */}
+            <View style={styles.safetyHeader}>
+              <View style={styles.safetyIconCircle}>
+                <Ionicons name="shield-checkmark" size={36} color={COLORS.primary} />
+              </View>
+              <Text style={styles.stepTitle}>Safety First 🛡️</Text>
+              <Text style={styles.stepSubtitle}>
+                Add an emergency contact so someone you trust always knows you're safe. This is optional but strongly recommended.
+              </Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Emergency Contact Name</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g. Mum, Best Friend"
+                value={emergencyName}
+                onChangeText={setEmergencyName}
+                autoCapitalize="words"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Their Phone Number</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="+263 77 123 4567"
+                value={emergencyPhone}
+                onChangeText={setEmergencyPhone}
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Relationship</Text>
+              <View style={styles.relationOptions}>
+                {['Parent', 'Sibling', 'Friend', 'Partner', 'Other'].map(r => (
+                  <TouchableOpacity
+                    key={r}
+                    style={[styles.relationBtn, emergencyRelation === r && styles.relationBtnActive]}
+                    onPress={() => setEmergencyRelation(r)}
+                  >
+                    <Text style={[styles.relationText, emergencyRelation === r && styles.relationTextActive]}>
+                      {r}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* What this enables */}
+            <View style={styles.safetyFeaturesList}>
+              <Text style={styles.safetyFeaturesTitle}>What this unlocks:</Text>
+              {[
+                { icon: 'location' as const, text: '"Share my location" — send your live location to this contact before a date' },
+                { icon: 'time' as const, text: 'Date check-in — we\'ll ask "Are you safe?" and alert them if you don\'t respond' },
+                { icon: 'warning' as const, text: 'Emergency SOS — one tap alerts them with your location' },
+              ].map((f, i) => (
+                <View key={i} style={styles.safetyFeatureRow}>
+                  <View style={styles.safetyFeatureIcon}>
+                    <Ionicons name={f.icon} size={18} color={COLORS.primary} />
+                  </View>
+                  <Text style={styles.safetyFeatureText}>{f.text}</Text>
+                </View>
+              ))}
+            </View>
+
+            {(!emergencyName || !emergencyPhone) && (
+              <TouchableOpacity
+                style={styles.skipSafetyBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Skip Safety Contact?',
+                    'You can always add one later in Settings → Safety Center. We strongly recommend adding one.',
+                    [
+                      { text: 'Add Contact', style: 'cancel' },
+                      { text: 'Skip for now', onPress: () => handleNext() },
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.skipSafetyText}>Skip for now</Text>
+              </TouchableOpacity>
+            )}
           </View>
         );
 
@@ -694,6 +772,18 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginBottom: SPACING.sm,
   },
+  cityFieldLabel: {
+    fontSize: FONTS.sizes.sm,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  locationHint: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
+    marginTop: SPACING.sm,
+  },
   ageRangeInputs: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -850,5 +940,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.white,
+  },
+  ageHint: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.sm,
+    fontStyle: 'italic',
   },
 });

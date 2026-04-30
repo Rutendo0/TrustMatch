@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,14 +8,18 @@ import {
   TouchableOpacity,
   TextInput,
   Keyboard,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { VerifiedBadge } from '../../components/common';
 import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
 import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
+import { useTheme } from '../../context/ThemeContext';
 
 type MessagesScreenProps = {
   navigation: NativeStackNavigationProp<any>;
@@ -109,22 +113,28 @@ const NEW_MATCHES: Match[] = [
 ];
 
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) => {
+  const { colors } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
   const [newMatches, setNewMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const searchInputRef = useRef<TextInput>(null);
   const { normalize: rNormalize } = useResponsive();
 
-  useEffect(() => {
-    fetchMatches();
-  }, []);
+  // Re-fetch every time the screen comes into focus (e.g. after a new match)
+  useFocusEffect(
+    useCallback(() => {
+      fetchMatches();
+    }, [])
+  );
 
-  const fetchMatches = async () => {
+  const fetchMatches = async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    setError(null);
     try {
       const data = await api.getMatches();
-      // Map API response to Match interface
-      // Separate matches into new matches (no messages yet) and conversations
       const newMatchesList: Match[] = [];
       const conversationsList: Match[] = [];
       
@@ -137,13 +147,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
           trustScore: 85,
           aiModerationEnabled: true,
           safetyLevel: 'high' as const,
-          lastMessage: m.lastMessage?.content || 'Start a conversation!',
+          lastMessage: m.lastMessage?.content || undefined,
           lastMessageTime: m.lastMessage?.sentAt ? formatTime(m.lastMessage.sentAt) : '',
           unreadCount: m.lastMessage && !m.lastMessage.isRead ? 1 : 0,
           isOnline: m.user?.isOnline || false,
         };
         
-        // If there's no message, it's a new match
         if (!m.lastMessage) {
           newMatchesList.push({ ...match, isNew: true });
         } else {
@@ -153,10 +162,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
       
       setNewMatches(newMatchesList);
       setMatches(conversationsList);
-    } catch (error) {
-      console.error('Failed to fetch matches:', error);
+    } catch (err) {
+      console.error('Failed to fetch matches:', err);
+      setError('Could not load matches. Pull down to retry.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -313,9 +324,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Text style={[styles.headerTitle, { fontSize: normalize(FONTS.sizes.xxl) }]}>Messages</Text>
+        <Text style={[styles.headerTitle, { fontSize: normalize(FONTS.sizes.xxl), color: colors.text }]}>Messages</Text>
       </View>
       
       {/* Safety Status Bar */}
@@ -351,45 +362,89 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
         )}
       </View>
 
-      {newMatches.length > 0 && (
-      <View style={styles.newMatchesSection}>
-        <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>New Matches</Text>
-        <FlatList
-          data={newMatches}
-          renderItem={renderNewMatch}
-          keyExtractor={(item) => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.newMatchesList}
-          keyboardShouldPersistTaps="handled"
-        />
-      </View>
-      )}
-
-      <View style={styles.conversationsSection}>
-        <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>Conversations</Text>
-        <FlatList
-          data={filteredMatches}
-          renderItem={renderConversation}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.conversationsList}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Ionicons name="chatbubbles-outline" size={normalize(60)} color={COLORS.textLight} />
-              <Text style={[styles.emptyTitle, { fontSize: normalize(FONTS.sizes.lg) }]}>
-                No conversations yet
+      {/* Loading state */}
+      {loading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.centerStateText}>Loading your matches...</Text>
+        </View>
+      ) : error ? (
+        /* Error state */
+        <View style={styles.centerState}>
+          <Ionicons name="wifi-outline" size={normalize(50)} color={COLORS.textLight} />
+          <Text style={[styles.emptyTitle, { fontSize: normalize(FONTS.sizes.lg) }]}>
+            Something went wrong
+          </Text>
+          <Text style={[styles.emptySubtitle, { fontSize: normalize(FONTS.sizes.sm) }]}>
+            {error}
+          </Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => fetchMatches()}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          {/* New Matches row */}
+          {newMatches.length > 0 && (
+            <View style={styles.newMatchesSection}>
+              <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>
+                New Matches
               </Text>
-              <Text style={[styles.emptySubtitle, { fontSize: normalize(FONTS.sizes.sm) }]}>
-                Start swiping to find your match!
-              </Text>
+              <FlatList
+                data={newMatches}
+                renderItem={renderNewMatch}
+                keyExtractor={(item) => item.id}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.newMatchesList}
+                keyboardShouldPersistTaps="handled"
+              />
             </View>
-          }
-          contentInsetAdjustmentBehavior="automatic"
-        />
-      </View>
+          )}
+
+          {/* Conversations list */}
+          <View style={styles.conversationsSection}>
+            {matches.length > 0 || newMatches.length > 0 ? (
+              <Text style={[styles.sectionTitle, { fontSize: normalize(FONTS.sizes.md) }]}>
+                {matches.length > 0 ? 'Conversations' : 'Start a conversation'}
+              </Text>
+            ) : null}
+            <FlatList
+              data={filteredMatches}
+              renderItem={renderConversation}
+              keyExtractor={(item) => item.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.conversationsList}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => fetchMatches(true)}
+                  colors={[COLORS.primary]}
+                  tintColor={COLORS.primary}
+                />
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Ionicons name="chatbubbles-outline" size={normalize(60)} color={COLORS.textLight} />
+                  <Text style={[styles.emptyTitle, { fontSize: normalize(FONTS.sizes.lg) }]}>
+                    {newMatches.length > 0
+                      ? 'Tap a match above to say hi!'
+                      : 'No matches yet'}
+                  </Text>
+                  <Text style={[styles.emptySubtitle, { fontSize: normalize(FONTS.sizes.sm) }]}>
+                    {newMatches.length > 0
+                      ? 'Your conversations will appear here once you start chatting.'
+                      : 'Keep swiping to find your match!'}
+                  </Text>
+                </View>
+              }
+              contentInsetAdjustmentBehavior="automatic"
+            />
+          </View>
+        </>
+      )}
     </SafeAreaView>
   );
 };
@@ -596,9 +651,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text,
     marginTop: SPACING.md,
+    textAlign: 'center',
+    paddingHorizontal: SPACING.lg,
   },
   emptySubtitle: {
     color: COLORS.textSecondary,
     marginTop: SPACING.xs,
+    textAlign: 'center',
+    paddingHorizontal: SPACING.lg,
+  },
+  centerState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.xxl,
+  },
+  centerStateText: {
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
+    fontSize: FONTS.sizes.sm,
+  },
+  retryButton: {
+    marginTop: SPACING.lg,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: FONTS.sizes.md,
   },
 });

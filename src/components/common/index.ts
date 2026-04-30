@@ -25,3 +25,4 @@ export {
   ButtonLoading 
 } from './LoadingSpinner';
 export { ErrorBoundary } from './ErrorBoundary';
+export { AgeRangeInput } from './AgeRangeInput';

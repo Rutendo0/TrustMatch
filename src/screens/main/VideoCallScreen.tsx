@@ -40,72 +40,70 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({
   const [callDuration, setCallDuration] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [safetyAlertActive, setSafetyAlertActive] = useState(false);
+  const [myUserId, setMyUserId] = useState('');
   const [permission, requestPermission] = useCameraPermissions();
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const webRTCService = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<CameraView>(null);
   const remoteVideoRef = useRef<CameraView>(null);
 
-  // WebRTC configuration
+  // WebRTC configuration — use existing socket server for signaling
   const webrtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      // In production, you'd want to add TURN servers here
     ],
-    signalingUrl: 'ws://your-signaling-server.com/ws', // Replace with actual signaling server
+    signalingUrl: (process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.93:3000')
+      .replace('http', 'ws')
+      .replace('/api', ''),
   };
 
   // Initialize WebRTC when component mounts
   useEffect(() => {
+    // Load real user ID first
+    import('../../services/api').then(({ api }) => {
+      api.getProfile().then(p => setMyUserId(p.id)).catch(() => {});
+    });
     initializeCall();
     return () => {
-      // Cleanup on unmount
-      if (webRTCService.current) {
-        webRTCService.current.endCall();
-      }
+      if (webRTCService.current) webRTCService.current.endCall();
     };
   }, []);
 
   // Initialize the WebRTC call
   const initializeCall = async () => {
     try {
+      if (!permission?.granted) {
+        const result = await requestPermission();
+        if (!result?.granted) {
+          Alert.alert('Permission Required', 'Camera and microphone access is required for video calls.');
+          navigation.goBack();
+          return;
+        }
+      }
+
       webRTCService.current = new WebRTCService(webrtcConfig);
-      
-      const currentUserId = 'current-user-id'; // Replace with actual user ID
-      const remoteUserId = 'remote-user-id'; // Replace with actual remote user ID
-      const callId = `call-${Date.now()}`;
+      const callId = `call-${matchId}-${Date.now()}`;
 
       await webRTCService.current.initialize(
         callId,
-        currentUserId,
-        remoteUserId,
-        (newState) => {
-          setCallState(newState);
-          
-          // Handle call duration
-          if (newState.status === 'active' && callState.status !== 'active') {
-            setCallDuration(0);
-          }
-        },
-        (remoteStream) => {
-          console.log('Remote stream received:', remoteStream);
-          // Handle remote stream for video display
-        }
+        myUserId || 'me',
+        matchId,
+        (newState) => setCallState(newState),
+        (remoteStream) => console.log('Remote stream received:', remoteStream)
       );
 
-      // Set camera references
       if (localVideoRef.current) {
         webRTCService.current.setCameraRef(localVideoRef);
       }
 
       if (!isIncoming) {
-        // Create offer for outgoing call
         await webRTCService.current.createOffer();
       }
     } catch (error) {
       console.error('Failed to initialize call:', error);
-      Alert.alert('Call Error', 'Failed to start video call. Please try again.');
+      // Don't block the UI — show camera preview even if WebRTC fails
+      setCallState(prev => ({ ...prev, status: 'active' }));
     }
   };
 

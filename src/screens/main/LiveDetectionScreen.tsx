@@ -168,7 +168,7 @@ export const LiveDetectionScreen: React.FC<LiveDetectionScreenProps> = ({
         <Text style={styles.title}>Live Identity Verification</Text>
         <Text style={styles.subtitle}>
           Take a live selfie to verify your identity and prevent catfishing.
-          We'll compare your live photo with your stored profile photos.
+          We'll compare your live photo with your uploaded profile photos.
         </Text>
       </View>
 
@@ -183,7 +183,7 @@ export const LiveDetectionScreen: React.FC<LiveDetectionScreenProps> = ({
         <View style={styles.instructionItem}>
           <Ionicons name="people" size={20} color={COLORS.primary} />
           <Text style={styles.instructionText}>
-            We compare it with your stored profile photos
+            We compare it with your uploaded profile photos
           </Text>
         </View>
         <View style={styles.instructionItem}>
@@ -290,7 +290,7 @@ export const LiveDetectionScreen: React.FC<LiveDetectionScreenProps> = ({
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.processingTitle}>Verifying Your Identity...</Text>
           <Text style={styles.processingSubtitle}>
-            Comparing with your stored photos
+            Comparing with your uploaded photos
           </Text>
         </View>
 

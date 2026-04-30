@@ -52,36 +52,104 @@ export interface VerificationResult {
 const DOCUMENT_PATTERNS = {
   passport: {
     documentNumber: /(?:PASSPORT|PASSPORT\s*NO|PP\s*NO|DOCUMENT\s*NO)[:.\s]*([A-Z0-9]{6,9})/i,
-    surname: /(?:SURNAME)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
-    firstName: /(?:FIRST\s*NAME|GIVEN\s*NAMES?)[:.\s]*([A-Za-z]+)/i,
-    name: /(?:NAME|SURNAME\s*AND\s*GIVEN\s*NAMES?|GIVEN\s*NAMES?)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
-    nationality: /(?:NATIONALITY|COUNTRY)[:.\s]*([A-Za-z]+)/i,
-    dob: /(?:DATE\s*OF\s*BIRTH|DOB|D\.O\.B)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
-    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
-    gender: /(?:SEX|GENDER)[:.\s]*([MF]|MALE|FEMALE)/i,
+    surname: /SURNAME\s+([A-Z][A-Z\s]+?)(?=\s+FIRST|\s+GIVEN|\s+DATE|\s*$)/i,
+    firstName: /FIRST\s+NAME\s+([A-Z][A-Z\s]+?)(?=\s+DATE|\s+OF\s+BIRTH|\s+NATION|\s+SEX|\s*$)/i,
+    name: /(?:NAME|SURNAME\s*AND\s*GIVEN\s*NAMES?)[\s:]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*?)(?:\s{2,}|DATE|$)/i,
+    nationality: /(?:NATIONALITY|COUNTRY)[\s:]*([A-Za-z]+)/i,
+    dob: /DATE\s+OF\s+BIRTH\s+(\d{2}\/\d{2}\/\d{4})/i,
+    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION)[^0-9]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    gender: /(?:SEX|GENDER)[\s:]*([MF](?:ALE|EMALE)?)\b/i,
   },
   drivers_license: {
-    documentNumber: /(?:LICENSE\s*NO|LICENCE\s*NO|DL\s*NO|DRIVER'S?\s*LICENSE)[:.\s]*([A-Z0-9]{5,15})/i,
-    surname: /(?:SURNAME)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
-    firstName: /(?:FIRST\s*NAME|GIVEN\s*NAMES?)[:.\s]*([A-Za-z]+)/i,
-    name: /(?:NAME|SURNAME|FULL\s*NAME|LICENCE\s*HOLDER)[:.\s]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
-    dob: /(?:DATE\s*OF\s*BIRTH|DOB|D\.O\.B|DATE\s*OF\s*ISSUE)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
-    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION\s*DATE)[:.\s]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
-    address: /(?:ADDRESS|ADD)[:.\s]*([A-Za-z0-9\s,]+(?:,\s*[A-Za-z0-9\s,]+)*)/i,
-    restrictions: /(?:RESTRICTIONS|CONDITIONS)[:.\s]*([A-Za-z]+)/i,
-    class: /(?:CLASS|CAT)[:.\s]*([A-Z0-9]+)/i,
+    documentNumber: /(?:LICENSE\s*NO|LICENCE\s*NO|DL\s*NO|DRIVER'?S?\s*LICEN[SC]E)[\s:]*([A-Z0-9]{5,15})/i,
+    surname: /SURNAME\s+([A-Z][A-Z\s]+?)(?=\s+FIRST|\s+DATE|\s*$)/i,
+    firstName: /FIRST\s+NAME\s+([A-Z][A-Z\s]+?)(?=\s+DATE|\s+OF|\s*$)/i,
+    name: /(?:NAME|FULL\s*NAME|LICENCE\s*HOLDER)[\s:]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*?)(?:\s{2,}|DATE|$)/i,
+    dob: /DATE\s+OF\s+BIRTH\s+(\d{2}\/\d{2}\/\d{4})/i,
+    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL|EXPIRATION\s*DATE)[^0-9]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    address: /(?:ADDRESS|ADD)[\s:]*([A-Za-z0-9\s,]+?)(?:\s{2,}|DATE|$)/i,
   },
   national_id: {
-    documentNumber: /(?:ID\s*NO|IDENTIFICATION\s*NO|NATIONAL\s*ID|NRIC)[^A-Za-z]*([A-Z0-9-]+)/i,
-    firstName: /(?:FIRST\s*NAME|GIVEN\s*NAMES?)[^A-Za-z]*([A-Za-z]+)/i,
-    surname: /(?:SURNAME)[^A-Za-z]*([A-Za-z]+)/i,
-    name: /(?:NAME|FULL\s*NAME|IC\s*HOLDER)[^A-Za-z]*([A-Za-z]+(?:[\s-]+[A-Za-z]+)*)/i,
-    dob: /(?:DATE\s*(?:O[FB]|OF)\s*BIRTH|DOB|D\.O\.B|BIRTH\s*DATE)[^0-9]*(\d{1,2}\D+\d{1,2}\D+\d{2,4})/i,
-    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL)[^0-9]*(\d{1,2}\D+\d{1,2}\D+\d{2,4})/i,
-    nationality: /(?:NATIONALITY|COUNTRY)[^A-Za-z]*([A-Za-z]+)/i,
-    address: /(?:ADDRESS)[^A-Za-z]*([A-Za-z0-9\s,]+(?:,\s*[A-Za-z0-9\s,]+)*)/i,
+    // Zimbabwe NID: "ID NUMBER 63-2271966 L 63 CIT"
+    documentNumber: /ID\s+NUMBER\s+(\d{2}-\d{7}(?:\s+\w+\s+\d{2}\s+\w+)?)/i,
+    // Robust surname: capture everything between SURNAME and FIRST (stop at noise)
+    surname: /SURNAME\s+([A-Z][A-Z\s]+?)(?=\s+FIRST|\s+[A-Z]{4,}\s+NAME|\s*$)/i,
+    // Robust first name: capture everything between FIRST NAME and DATE OF BIRTH
+    firstName: /FIRST\s+NAME\s+([A-Z][A-Z\s]+?)(?=\s+DATE|\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE|\s*$)/i,
+    // DOB with label
+    dob: /DATE\s+OF\s+BIRTH\s+(\d{2}\/\d{2}\/\d{4})/i,
+    expiry: /(?:EXPIRY|EXPIRES?|VALID\s*UNTIL)[^0-9]*(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    nationality: /(?:NATIONALITY|COUNTRY)[\s:]*([A-Za-z]+)/i,
+    address: /(?:ADDRESS)[\s:]*([A-Za-z0-9\s,]+?)(?:\s{2,}|DATE|$)/i,
   },
 };
+
+/**
+ * Smart extractor for OCR.space output from Zimbabwe NID.
+ * OCR.space returns labels and values on separate lines, normalized to a single line.
+ * Layout: "... SURNAME FIRST NAME DATE OF BIRTH ... 63-2271966 L 63 CIT F MIKITAYO RUTENDO BRENDA 19/07/2002 ..."
+ * The values appear AFTER all the labels, in the same order.
+ */
+function extractNamesFromOcrText(text: string): { firstName?: string; lastName?: string; dob?: string } {
+  const upper = text.toUpperCase();
+
+  // Strategy 1: Find surname and first name using label positions
+  // In OCR.space output, SURNAME label comes before FIRST NAME label,
+  // and the actual values appear after all labels in order
+  const surnameMatch = upper.match(
+    /SURNAME\s+([A-Z]{3,}(?:\s+[A-Z]{3,})*?)(?=\s+FIRST\s+NAME|\s+DATE|\s+VILLAGE|\s+PLACE|\s*$)/
+  );
+  const firstNameMatch = upper.match(
+    /FIRST\s+NAME\s+([A-Z]{3,}(?:\s+[A-Z]{2,})*?)(?=\s+DATE|\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE|\s*$)/
+  );
+  const dobMatch = upper.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
+
+  // Strategy 2: For OCR.space layout where values come after all labels
+  // Find the block of uppercase words that appear after the ID number
+  // Pattern: "63-2271966 L 63 CIT F MIKITAYO RUTENDO BRENDA 19/07/2002"
+  let lastName: string | undefined;
+  let firstName: string | undefined;
+
+  if (surnameMatch?.[1]) {
+    // Take ALL words from surname match (handles compound surnames)
+    const words = surnameMatch[1].trim().split(/\s+/);
+    const IGNORE = new Set(['FIRST', 'NAME', 'DATE', 'BIRTH', 'VILLAGE', 'PLACE', 'ORIGIN', 'ISSUE', 'SIGNATURE', 'HOLDER', 'FINGERPRINT', 'NATIONAL', 'REGISTRATION', 'REPUBLIC', 'ZIMBABWE', 'NUMBER', 'SURNAME', 'CIT', 'HARARE', 'BULAWAYO']);
+    // Filter out noise words and join all valid name parts
+    const validWords = words.filter(w => w.length >= 2 && !IGNORE.has(w));
+    if (validWords.length > 0) {
+      lastName = validWords.join(' ');
+    }
+  }
+
+  if (firstNameMatch?.[1]) {
+    // Take ALL words from first name match (handles middle names like "BRIGHT TINASHE")
+    const words = firstNameMatch[1].trim().split(/\s+/);
+    const IGNORE = new Set(['FIRST', 'NAME', 'DATE', 'BIRTH', 'VILLAGE', 'PLACE', 'ORIGIN', 'ISSUE', 'SIGNATURE', 'HOLDER', 'FINGERPRINT', 'NATIONAL', 'REGISTRATION', 'REPUBLIC', 'ZIMBABWE', 'NUMBER', 'SURNAME', 'CIT', 'HARARE', 'BULAWAYO']);
+    // Filter out noise words and join all valid name parts
+    const validWords = words.filter(w => w.length >= 2 && !IGNORE.has(w));
+    if (validWords.length > 0) {
+      firstName = validWords.join(' ');
+    }
+  }
+
+  // Strategy 3: If label-based failed, find values after the ID number pattern
+  // Zimbabwe ID: "63-2271966 L 63 CIT F" followed by SURNAME then FIRSTNAME
+  if (!lastName || !firstName) {
+    const afterIdMatch = upper.match(/\d{2}-\d{7}\s+\w+\s+\d+\s+(\w+)\s+\w+\s+([A-Z]{3,})\s+([A-Z]{3,})/);
+    if (afterIdMatch) {
+      // afterIdMatch[2] = surname, afterIdMatch[3] = first name
+      const IGNORE = new Set(['CIT', 'THE', 'AND', 'FOR']);
+      if (!lastName && afterIdMatch[2] && !IGNORE.has(afterIdMatch[2])) lastName = afterIdMatch[2];
+      if (!firstName && afterIdMatch[3] && !IGNORE.has(afterIdMatch[3])) firstName = afterIdMatch[3];
+    }
+  }
+
+  return {
+    firstName: firstName?.toUpperCase(),
+    lastName: lastName?.toUpperCase(),
+    dob: dobMatch?.[1],
+  };
+}
 
 // Common date formats
 const DATE_FORMATS = [
@@ -96,12 +164,10 @@ class DocumentVerificationService {
    * Accepts a data: base64 URI, a remote http/https URL, or a local file:// / ph:// URI
    * (local URIs are read and converted to base64 before sending).
    */
-  async extractTextFromImage(imageUri: string): Promise<string> {
+  async extractTextFromImage(imageUri: string): Promise<{ text: string; error?: string }> {
     try {
       let imageForOcr = imageUri;
 
-      // Convert local file URIs (file://, ph://, content://) to base64 so the
-      // server-side OCR can process them — the server can't reach the device filesystem.
       if (!imageUri.startsWith('data:') && !imageUri.startsWith('http')) {
         const base64 = await FileSystem.readAsStringAsync(imageUri, {
           encoding: 'base64' as any,
@@ -112,15 +178,20 @@ class DocumentVerificationService {
 
       const result = await api.extractDocumentText(imageForOcr);
 
+      // Server rejected due to low quality — surface the error
+      if (result?.error) {
+        return { text: '', error: result.error };
+      }
+
       if (result?.success && result.text) {
-        return result.text as string;
+        return { text: result.text as string };
       }
 
       console.log('Server-side OCR returned no text');
-      return '';
+      return { text: '' };
     } catch (error) {
       console.log('OCR error:', error);
-      return '';
+      return { text: '' };
     }
   }
 
@@ -134,16 +205,39 @@ class DocumentVerificationService {
       rawText: text,
     };
 
-    // Extract each field using regex patterns
+    // For national IDs, use the smart positional extractor first
+    if (documentType === 'national_id') {
+      const smartNames = extractNamesFromOcrText(text);
+      if (smartNames.firstName) extractedData.firstName = smartNames.firstName;
+      if (smartNames.lastName) extractedData.lastName = smartNames.lastName;
+      if (smartNames.dob) extractedData.dateOfBirth = this.normalizeDate(smartNames.dob);
+
+      // Extract ID number: "ID NUMBER 63-2271966 L 63 CIT"
+      const idMatch = text.match(/ID\s+NUMBER\s+(\d{2}-\d{7})/i);
+      if (idMatch) extractedData.documentNumber = idMatch[1].trim().toUpperCase();
+
+      console.log('[parseDocumentText] Smart extraction result:', {
+        firstName: extractedData.firstName,
+        lastName: extractedData.lastName,
+        dateOfBirth: extractedData.dateOfBirth,
+        documentNumber: extractedData.documentNumber,
+      });
+
+      return extractedData;
+    }
+
+    // For passport and driver's license, use regex patterns
     for (const [field, pattern] of Object.entries(patterns)) {
       const match = text.match(pattern);
       if (match && match[1]) {
         const value = match[1].trim().toUpperCase();
-        
+
         switch (field) {
           case 'name':
-            // Store full name - let backend handle name order comparison
             extractedData.fullName = value;
+            break;
+          case 'surname':
+            extractedData.lastName = value;
             break;
           case 'firstName':
             extractedData.firstName = value;

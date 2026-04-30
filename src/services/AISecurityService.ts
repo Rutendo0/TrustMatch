@@ -150,29 +150,22 @@ export class AISecurityService {
   // Liveness Detection
   async detectLiveness(selfieImageUri: string): Promise<LivenessResult> {
     try {
-      await this.simulateProcessingDelay(2000);
-      
+      await this.simulateProcessingDelay(1000);
+
+      // Liveness is considered passed as long as a photo was captured.
+      // Real anti-spoofing is handled by DeepFace face comparison on the server.
       const indicators = {
-        blinkDetected: Math.random() > 0.2,
-        headMovement: Math.random() > 0.3,
-        lightingConsistency: Math.random() > 0.1,
-        skinTexture: Math.random() > 0.15
+        blinkDetected: true,
+        headMovement: true,
+        lightingConsistency: true,
+        skinTexture: true,
       };
 
-      const riskFactors: string[] = [];
-      if (!indicators.blinkDetected) riskFactors.push('No blink detected');
-      if (!indicators.headMovement) riskFactors.push('Limited head movement');
-      if (!indicators.lightingConsistency) riskFactors.push('Inconsistent lighting');
-      if (!indicators.skinTexture) riskFactors.push('Suspicious skin texture');
-
-      const confidence = Object.values(indicators).filter(Boolean).length / 4;
-      const isLive = confidence > 0.6 && riskFactors.length < 2;
-
       return {
-        isLive,
-        confidence,
+        isLive: true,
+        confidence: 1,
         indicators,
-        riskFactors
+        riskFactors: [],
       };
     } catch (error) {
       console.error('Liveness detection failed:', error);

@@ -6,12 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import Slider from '@react-native-community/slider';
-import { Button, Card } from '../../components/common';
+import { Button, Card, AgeRangeInput } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { Dealbreakers } from '../../types/advanced';
 
@@ -29,7 +29,7 @@ export const DealbreakersScreen: React.FC<DealbreakersScreenProps> = ({
     religion: [],
     wantsKids: 'any',
     hasKids: 'any',
-    maxDistance: 50,
+    preferredCity: '',
     minAge: 18,
     maxAge: 50,
     education: [],
@@ -144,60 +144,24 @@ export const DealbreakersScreen: React.FC<DealbreakersScreenProps> = ({
 
         <Card style={styles.section}>
           <Text style={styles.sectionTitle}>Age Range</Text>
-          <View style={styles.ageRangeContainer}>
-            <Text style={styles.ageValue}>{dealbreakers.minAge}</Text>
-            <Text style={styles.ageSeparator}>to</Text>
-            <Text style={styles.ageValue}>{dealbreakers.maxAge}</Text>
-          </View>
-          <View style={styles.sliderContainer}>
-            <Text style={styles.sliderLabel}>Min Age</Text>
-            <Slider
-              style={styles.slider}
-              minimumValue={18}
-              maximumValue={dealbreakers.maxAge - 1}
-              value={dealbreakers.minAge}
-              onValueChange={(value) =>
-                updateDealbreaker('minAge', Math.round(value))
-              }
-              minimumTrackTintColor={COLORS.primary}
-              maximumTrackTintColor={COLORS.border}
-              thumbTintColor={COLORS.primary}
-            />
-          </View>
-          <View style={styles.sliderContainer}>
-            <Text style={styles.sliderLabel}>Max Age</Text>
-            <Slider
-              style={styles.slider}
-              minimumValue={dealbreakers.minAge + 1}
-              maximumValue={100}
-              value={dealbreakers.maxAge}
-              onValueChange={(value) =>
-                updateDealbreaker('maxAge', Math.round(value))
-              }
-              minimumTrackTintColor={COLORS.primary}
-              maximumTrackTintColor={COLORS.border}
-              thumbTintColor={COLORS.primary}
-            />
-          </View>
+          <AgeRangeInput
+            minAge={dealbreakers.minAge}
+            maxAge={dealbreakers.maxAge}
+            onMinChange={(val) => updateDealbreaker('minAge', val)}
+            onMaxChange={(val) => updateDealbreaker('maxAge', val)}
+          />
         </Card>
 
         <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>Maximum Distance</Text>
-          <View style={styles.distanceContainer}>
-            <Text style={styles.distanceValue}>{dealbreakers.maxDistance} km</Text>
-          </View>
-          <Slider
-            style={styles.slider}
-            minimumValue={1}
-            maximumValue={200}
-            value={dealbreakers.maxDistance}
-            onValueChange={(value) =>
-              updateDealbreaker('maxDistance', Math.round(value))
-            }
-            minimumTrackTintColor={COLORS.primary}
-            maximumTrackTintColor={COLORS.border}
-            thumbTintColor={COLORS.primary}
+          <Text style={styles.sectionTitle}>Preferred City</Text>
+          <TextInput
+            style={styles.cityInput}
+            placeholder="e.g. Harare"
+            value={dealbreakers.preferredCity || ''}
+            onChangeText={(text) => updateDealbreaker('preferredCity', text)}
+            autoCapitalize="words"
           />
+          <Text style={styles.cityHint}>Only show people from this city</Text>
         </Card>
 
         <Card style={styles.section}>
@@ -480,6 +444,22 @@ const styles = StyleSheet.create({
     fontSize: FONTS.sizes.xl,
     fontWeight: 'bold',
     color: COLORS.primary,
+  },
+  cityInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    fontSize: FONTS.sizes.md,
+    color: COLORS.text,
+    backgroundColor: COLORS.white,
+    marginBottom: SPACING.xs,
+  },
+  cityHint: {
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
   },
   optionsGrid: {
     flexDirection: 'row',

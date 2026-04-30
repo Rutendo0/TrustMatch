@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { VerifiedBadge, Button } from '../../components/common';
 import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { useTheme } from '../../context/ThemeContext';
 import { normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
@@ -49,30 +50,61 @@ interface ProfileDetailScreenProps {
 }
 
 export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ navigation, route }) => {
+  const { colors } = useTheme();
   const { profile: initialProfile, isOwnProfile: isOwnProfileParam } = route.params;
+
+  // Determine upfront: own profile = explicitly flagged, or no profile passed
+  const isViewingOwnProfile = isOwnProfileParam === true || !initialProfile || initialProfile?.id === 'current-user';
+
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [userData, setUserData] = useState<any>(null);
   const [showImagePicker, setShowImagePicker] = useState(false);
-  const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
 
-  // Fetch user profile data
   useEffect(() => {
-    fetchUserProfile();
-  }, []);
+    if (isViewingOwnProfile) {
+      fetchOwnProfile();
+    } else if (initialProfile?.id) {
+      fetchOtherUserProfile(initialProfile.id);
+    }
+  }, [isViewingOwnProfile]);
 
-  const fetchUserProfile = async () => {
+  const fetchOwnProfile = async () => {
     try {
       setIsLoading(true);
       const data = await api.getProfile();
       setUserData(data);
-      // Check if viewing own profile based on whether profile.id matches current user
-      setIsCurrentUserProfile(isOwnProfileParam || !initialProfile || initialProfile?.id === 'current-user' || data?.id === initialProfile?.id);
     } catch (error) {
       console.error('Failed to fetch profile:', error);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const fetchOtherUserProfile = async (userId: string) => {
+    try {
+      setIsLoading(true);
+      const data = await api.getUserById(userId);
+      setUserData(data);
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+      // Fall back to whatever was passed in
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Calculate age from dateOfBirth
+  const calculateAge = (dateOfBirth: string) => {
+    if (!dateOfBirth) return 25;
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age > 0 ? age : 25;
   };
 
   // Default profile to prevent null access
@@ -95,38 +127,37 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
     verificationBadges: ['Identity', 'Selfie']
   };
 
-  // Calculate age from dateOfBirth
-  const calculateAge = (dateOfBirth: string) => {
-    if (!dateOfBirth) return 25;
-    const today = new Date();
-    const birthDate = new Date(dateOfBirth);
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
+  // When viewing own profile, build from fetched userData (GET /users/me).
+  // When viewing someone else's profile, build from fetched userData (GET /users/:id).
+  // Fall back to initialProfile if fetch failed, then defaultProfile.
+  const profile: Profile = (() => {
+    if (userData) {
+      return {
+        id: userData.id || 'current-user',
+        name: userData.firstName || 'User',
+        age: isViewingOwnProfile ? calculateAge(userData.dateOfBirth) : (userData.age ?? calculateAge(userData.dateOfBirth)),
+        bio: userData.bio || 'No bio yet',
+        aboutMe: userData.aboutMe || '',
+        occupation: userData.occupation || '',
+        education: userData.education || '',
+        distance: userData.city || userData.country || '',
+        // Own profile: photos is array of objects { url }. Other user: photos is array of strings.
+        photos: isViewingOwnProfile
+          ? (userData.photos?.filter((p: any) => p.url)?.map((p: any) => p.url) || [])
+          : (userData.photos || []).filter(Boolean),
+        isVerified: userData.isVerified || userData.verification?.isVerified || false,
+        trustScore: userData.trustScore || userData.verification?.trustScore || 85,
+        compatibility: initialProfile?.compatibility ?? 0,
+        personalityType: userData.personalityType || 'N/A',
+        interests: Array.isArray(userData.interests) ? userData.interests : [],
+        safetyFeatures: userData.safetyFeatures || (userData.isVerified ? ['Verified'] : []),
+        verificationBadges: userData.verificationBadges || [],
+      };
     }
-    return age > 0 ? age : 25;
-  };
+    return initialProfile || defaultProfile;
+  })();
 
-  // Use real user data if available
-  const profile: Profile = userData ? {
-    id: userData.id || 'current-user',
-    name: userData.firstName || 'User',
-    age: calculateAge(userData.dateOfBirth),
-    bio: userData.bio || 'No bio yet',
-    aboutMe: userData.aboutMe || '',
-    occupation: userData.occupation || '',
-    education: userData.education || '',
-    distance: userData.city || userData.country || '',
-    photos: userData.photos?.filter((p: any) => p.url)?.map((p: any) => p.url) || [],
-    isVerified: userData.isVerified || false,
-    trustScore: userData.trustScore || userData.verification?.trustScore || 85,
-    compatibility: 0,
-    personalityType: userData.personalityType || 'N/A',
-    interests: userData.interests || [],
-    safetyFeatures: userData.safetyFeatures || (userData.isVerified ? ['Verified'] : []),
-    verificationBadges: userData.verificationBadges || []
-  } : initialProfile || defaultProfile;
+  const isCurrentUserProfile = isViewingOwnProfile;
 
   const canDeletePhoto = profile.photos.length > 3;
   const canAddPhoto = profile.photos.length < 6;
@@ -147,7 +178,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
     if (!result.canceled && result.assets[0]) {
       try {
         await api.uploadProfilePhoto(result.assets[0].uri);
-        await fetchUserProfile(); // Refresh data
+        await fetchOwnProfile(); // Refresh data
       } catch (error) {
         Alert.alert('Error', 'Failed to upload photo');
       }
@@ -171,7 +202,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
           onPress: async () => {
             try {
               await api.deletePhoto(photoId);
-              await fetchUserProfile(); // Refresh data
+              await fetchOwnProfile(); // Refresh data
             } catch (error) {
               Alert.alert('Error', 'Failed to delete photo');
             }
@@ -205,7 +236,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
@@ -214,7 +245,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity

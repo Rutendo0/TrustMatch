@@ -39,7 +39,7 @@ export interface UserPreferences {
     min: number;
     max: number;
   };
-  distance: number;
+  cities: string[];
   showMe: 'male' | 'female' | 'both';
 }
 
@@ -69,7 +69,7 @@ export interface SwipeAction {
 }
 
 export interface VerificationDocument {
-  type: 'passport' | 'drivers_license' | 'national_id';
+  type: 'national_id';
   imageUri: string;
   extractedData?: {
     fullName: string;

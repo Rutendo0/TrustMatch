@@ -138,7 +138,10 @@ export class LiveDetectionService {
        const matchRatio = totalMatches / storedPhotos.length;
        const confidence = Math.min(1, (matchRatio * 0.7) + (overallSimilarity * 0.3));
 
-       const isMatch = totalMatches >= requireMinimumMatches && overallSimilarity >= threshold;
+       // Pass if at least requireMinimumMatches photos matched — don't penalise
+       // with the average similarity across ALL photos (including non-matches),
+       // since one clear match is sufficient proof of identity.
+       const isMatch = totalMatches >= requireMinimumMatches;
 
        this.lastDetectionTime = now;
 

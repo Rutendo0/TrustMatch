@@ -40,23 +40,51 @@ export const initializeSocket = (httpServer: HttpServer): Server<ClientToServerE
     },
     pingTimeout: 60000,
     pingInterval: 25000,
-  });
+});
 
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
+      // Debug: Log the JWT_SECRET being used (first 10 chars for security)
+      const jwtSecret = process.env.JWT_SECRET;
+      if (!jwtSecret) {
+        logger.error('Socket authentication: JWT_SECRET is not defined!');
+        return next(new Error('Server configuration error: JWT_SECRET not set'));
+      }
+      logger.debug(`Socket authentication using JWT_SECRET: ${jwtSecret.substring(0, 10)}...`);
+
       const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
       
       if (!token) {
+        logger.warn('Socket authentication: No token provided');
         return next(new Error('Authentication required'));
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+      // Log token info for debugging (don't log full token)
+      logger.debug(`Socket authentication: Token received, length=${token.length}`);
+
+      const decoded = jwt.verify(token, jwtSecret) as { userId: string };
+      
+      if (!decoded || !decoded.userId) {
+        logger.warn('Socket authentication: Token decoded but no userId found');
+        return next(new Error('Invalid token: missing userId'));
+      }
+      
       socket.userId = decoded.userId;
+      logger.debug(`Socket authentication: User ${decoded.userId} authenticated successfully`);
       next();
-    } catch (error) {
-      logger.error('Socket authentication error:', error);
-      next(new Error('Invalid token'));
+    } catch (error: any) {
+      // Provide more helpful error messages based on error type
+      if (error.name === 'TokenExpiredError') {
+        logger.warn('Socket authentication: Token has expired');
+        next(new Error('Token expired'));
+      } else if (error.name === 'JsonWebTokenError') {
+        logger.error(`Socket authentication: Invalid signature - JWT_SECRET may have changed. Error: ${error.message}`);
+        next(new Error('Invalid token: signature mismatch'));
+      } else {
+        logger.error('Socket authentication error:', error);
+        next(new Error('Invalid token'));
+      }
     }
   });
 

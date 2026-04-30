@@ -14,8 +14,15 @@ router.post(
   ],
   async (req: AuthRequest, res: Response) => {
     try {
+      console.log('Swipe request received:', {
+        userId: req.userId,
+        targetUserId: req.body.targetUserId,
+        action: req.body.action,
+      });
+      
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
+        console.log('Validation errors:', errors.array());
         return res.status(400).json({ errors: errors.array() });
       }
 
@@ -57,6 +64,7 @@ router.post(
       });
 
       let isMatch = false;
+      let matchId: string | null = null;
 
       if (action === 'LIKE' || action === 'SUPERLIKE') {
         const reciprocalSwipe = await prisma.swipe.findFirst({
@@ -72,23 +80,27 @@ router.post(
 
           const [user1Id, user2Id] = [userId, targetUserId].sort();
 
-          await prisma.match.create({
+          const newMatch = await prisma.match.create({
             data: {
               user1Id,
               user2Id,
             },
           });
+          matchId = newMatch.id;
         }
       }
 
       res.json({
         success: true,
         isMatch,
+        matchId: matchId || null,
         matchedUser: isMatch ? {
           id: targetUser.id,
           firstName: targetUser.firstName,
         } : null,
       });
+      
+      console.log('Swipe successful:', { userId, targetUserId, action, isMatch });
     } catch (error) {
       if (error instanceof AppError) {
         return res.status(error.statusCode).json({ error: error.message });
@@ -105,8 +117,7 @@ router.get('/likes', async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const { limit = 20 } = req.query;
 
-    // Find all users who have swiped LIKE on current user
-    // but current user hasn't swiped on them yet
+    // Find all users who have swiped LIKE or SUPERLIKE on current user
     const likedMe = await prisma.swipe.findMany({
       where: {
         swipedId: userId,
@@ -120,20 +131,11 @@ router.get('/likes', async (req: AuthRequest, res: Response) => {
           },
         },
       },
+      orderBy: { createdAt: 'desc' },
       take: Number(limit),
     });
 
-    // Get current user's swipes to filter out
-    const mySwipes = await prisma.swipe.findMany({
-      where: { swiperId: userId },
-      select: { swipedId: true },
-    });
-    const mySwipedIds = new Set(mySwipes.map(s => s.swipedId));
-
-    // Filter to only show users who liked me and I haven't swiped yet
-    const mutualLikes = likedMe.filter(swipe => !mySwipedIds.has(swipe.swiperId));
-
-    const response = mutualLikes.map((swipe) => ({
+    const response = likedMe.map((swipe) => ({
       id: swipe.swiper.id,
       firstName: swipe.swiper.firstName,
       age: calculateAge(swipe.swiper.dateOfBirth),
@@ -191,6 +193,87 @@ router.get('/sent-likes', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/matches/passed - People the current user swiped DISLIKE on (for re-match)
+router.get('/passed', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { limit = 20 } = req.query;
+
+    const passed = await prisma.swipe.findMany({
+      where: {
+        swiperId: userId,
+        action: 'DISLIKE',
+      },
+      include: {
+        swiped: {
+          include: {
+            photos: { orderBy: { order: 'asc' } },
+            verification: { select: { isVerified: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Number(limit),
+    });
+
+    const response = passed.map((swipe) => ({
+      id: swipe.swiped.id,
+      swipeId: swipe.id,
+      firstName: swipe.swiped.firstName,
+      age: calculateAge(swipe.swiped.dateOfBirth),
+      bio: swipe.swiped.bio,
+      photos: swipe.swiped.photos.map(p => p.url),
+      isVerified: swipe.swiped.verification?.isVerified || false,
+      passedAt: swipe.createdAt,
+    }));
+
+    res.json(response);
+  } catch (error) {
+    console.error('Get passed error:', error);
+    res.status(500).json({ error: 'Failed to get passed profiles' });
+  }
+});
+
+// DELETE /api/matches/swipe/:targetUserId - Undo a swipe (delete the swipe record)
+router.delete('/swipe/:targetUserId', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { targetUserId } = req.params;
+
+    const deleted = await prisma.swipe.deleteMany({
+      where: {
+        swiperId: userId,
+        swipedId: targetUserId,
+      },
+    });
+
+    if (deleted.count === 0) {
+      return res.status(404).json({ error: 'Swipe not found' });
+    }
+
+    res.json({ success: true, message: 'Swipe removed successfully' });
+  } catch (error) {
+    console.error('Undo swipe error:', error);
+    res.status(500).json({ error: 'Failed to undo swipe' });
+  }
+});
+
+// DELETE /api/matches/passed/:swipeId - Remove a dislike so user can re-match
+router.delete('/passed/:swipeId', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { swipeId } = req.params;
+
+    await prisma.swipe.deleteMany({
+      where: { id: swipeId, swiperId: userId, action: 'DISLIKE' },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Remove pass error:', error);
+    res.status(500).json({ error: 'Failed to remove pass' });
+  }
+});
 // Helper function to calculate age
 function calculateAge(dateOfBirth: Date | string | null): number {
   if (!dateOfBirth) return 25;
@@ -204,6 +287,7 @@ function calculateAge(dateOfBirth: Date | string | null): number {
   return age;
 }
 
+// GET /api/matches — list all active matches for the current user
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;

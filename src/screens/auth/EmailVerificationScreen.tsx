@@ -68,10 +68,10 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
       // Clear registration progress since verification is complete
       await registrationProgress.clearProgress();
       
-      // Proceed to main app
+      // Show welcome screen for new users
       navigation.reset({
         index: 0,
-        routes: [{ name: 'MainTabs' }]
+        routes: [{ name: 'WelcomeNewUser' }],
       });
 
     } catch (error: any) {

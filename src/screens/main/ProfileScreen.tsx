@@ -6,7 +6,6 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
-  Switch,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -15,17 +14,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Card, VerifiedBadge } from '../../components/common';
-import { LiveVerificationBadge } from '../../components/verification/LiveVerificationBadge';
+import { Card, VerifiedBadge } from '../../components/common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/theme';
+import { useTheme } from '../../context/ThemeContext';
 import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP, wp, hp } from '../../hooks/useResponsive';
 import { ErrorBoundary } from '../../components/common/ErrorBoundary';
 import { api } from '../../services/api';
 
 export const ProfileScreen: React.FC = () => {
+  const { colors } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [showDistance, setShowDistance] = useState(true);
   const { isSmall, isTablet } = useResponsive();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -127,7 +125,7 @@ export const ProfileScreen: React.FC = () => {
   // Show loading state
   if (loading || !user) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]}>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
@@ -147,7 +145,7 @@ export const ProfileScreen: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.backgroundGray }]} edges={['top', 'left', 'right']}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardAvoid}
@@ -324,16 +322,6 @@ export const ProfileScreen: React.FC = () => {
             </View>
           </Card>
 
-          {/* Live Verification Badge */}
-          <LiveVerificationBadge
-            style={styles.liveVerificationBadge}
-            onVerificationComplete={(result) => {
-              console.log('Live verification completed:', result);
-              // Refresh profile to show updated verification status
-              fetchProfile();
-            }}
-          />
-
           <Card style={styles.preferencesCard}>
             <Text style={styles.sectionTitle}>Discovery Preferences</Text>
             
@@ -373,15 +361,15 @@ export const ProfileScreen: React.FC = () => {
               style={styles.preferenceItem}
               hitSlop={HIT_SLOP}
               accessibilityRole="button"
-              onPress={() => {
-                navigation.navigate('Filters');
-              }}
+              onPress={() => navigation.navigate('Filters')}
             >
               <View style={styles.preferenceLabel}>
                 <Ionicons name="location" size={normalize(20)} color={COLORS.textSecondary} />
-                <Text style={styles.preferenceText}>Maximum Distance</Text>
+                <Text style={styles.preferenceText}>My City</Text>
               </View>
-              <Text style={styles.preferenceValue}>{user.preferences?.maxDistance || 25} km</Text>
+              <Text style={styles.preferenceValue}>
+                {user.city || 'Not set'}
+              </Text>
             </TouchableOpacity>
           </Card>
 
@@ -400,36 +388,6 @@ export const ProfileScreen: React.FC = () => {
               {getAllPhotos().length === 0 && (
                 <Text style={styles.emptyText}>No photos added yet</Text>
               )}
-            </View>
-          </Card>
-
-          <Card style={styles.settingsCard}>
-            <Text style={styles.sectionTitle}>Settings</Text>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingLabel}>
-                <Ionicons name="notifications" size={normalize(20)} color={COLORS.textSecondary} />
-                <Text style={styles.settingText}>Push Notifications</Text>
-              </View>
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={setNotificationsEnabled}
-                trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
-                thumbColor={notificationsEnabled ? COLORS.primary : COLORS.textLight}
-              />
-            </View>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingLabel}>
-                <Ionicons name="eye" size={normalize(20)} color={COLORS.textSecondary} />
-                <Text style={styles.settingText}>Show Distance</Text>
-              </View>
-              <Switch
-                value={showDistance}
-                onValueChange={setShowDistance}
-                trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
-                thumbColor={showDistance ? COLORS.primary : COLORS.textLight}
-              />
             </View>
           </Card>
 
@@ -777,26 +735,6 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '500',
   },
-  settingsCard: {
-    marginHorizontal: normalize(SPACING.lg),
-    marginBottom: normalize(SPACING.md),
-  },
-  settingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    minHeight: MIN_TOUCH_SIZE,
-    paddingVertical: normalize(SPACING.sm),
-  },
-  settingLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: normalize(SPACING.sm),
-  },
-  settingText: {
-    fontSize: normalize(FONTS.sizes.md),
-    color: COLORS.text,
-  },
   menuSection: {
     backgroundColor: COLORS.white,
     marginHorizontal: normalize(SPACING.lg),
@@ -843,9 +781,5 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     textAlign: 'center',
     marginBottom: normalize(SPACING.xl),
-  },
-  liveVerificationBadge: {
-    marginHorizontal: normalize(SPACING.lg),
-    marginBottom: normalize(SPACING.md),
   },
 });

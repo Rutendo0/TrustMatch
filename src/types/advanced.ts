@@ -121,7 +121,7 @@ export interface Dealbreakers {
   religion: string[];
   wantsKids: 'yes' | 'no' | 'maybe' | 'any';
   hasKids: 'yes' | 'no' | 'any';
-  maxDistance: number;
+  preferredCity: string;
   minAge: number;
   maxAge: number;
   education: string[];

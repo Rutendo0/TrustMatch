@@ -7,6 +7,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -28,7 +29,7 @@ type ProfileDetailsScreenProps = {
 
 export const ProfileDetailsScreen: React.FC<ProfileDetailsScreenProps> = ({ navigation, route }) => {
   const { email, password, phone } = route.params;
-  
+
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -38,15 +39,18 @@ export const ProfileDetailsScreen: React.FC<ProfileDetailsScreenProps> = ({ navi
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    
+
     if (!firstName.trim()) newErrors.firstName = 'First name is required';
     if (!lastName.trim()) newErrors.lastName = 'Last name is required';
     if (!dateOfBirth) newErrors.dateOfBirth = 'Date of birth is required';
     if (!gender) newErrors.gender = 'Gender is required';
-    
-    // Check age is 18+
+
+    // Check age is 18+ (DatePicker returns DD/MM/YYYY)
     if (dateOfBirth) {
-      const dob = new Date(dateOfBirth);
+      const parts = dateOfBirth.split('/');
+      const dob = parts.length === 3
+        ? new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]))
+        : new Date(dateOfBirth);
       const today = new Date();
       let age = today.getFullYear() - dob.getFullYear();
       const monthDiff = today.getMonth() - dob.getMonth();
@@ -57,17 +61,27 @@ export const ProfileDetailsScreen: React.FC<ProfileDetailsScreenProps> = ({ navi
         newErrors.dateOfBirth = 'You must be at least 18 years old';
       }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  // Convert DD/MM/YYYY → YYYY-MM-DD for the API
+  const convertToISO = (ddmmyyyy: string): string => {
+    const parts = ddmmyyyy.split('/');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return ddmmyyyy;
+  };
+
   const handleContinue = async () => {
     if (!validate()) return;
-    
+
+    const isoDateOfBirth = convertToISO(dateOfBirth);
+
     setIsLoading(true);
     try {
-      // Try to register - if user already exists, this will return a token (login)
       try {
         await api.register({
           email,
@@ -75,22 +89,26 @@ export const ProfileDetailsScreen: React.FC<ProfileDetailsScreenProps> = ({ navi
           phone,
           firstName,
           lastName,
-          dateOfBirth,
+          dateOfBirth: isoDateOfBirth,
           gender,
           interestedIn: gender === 'MALE' ? 'FEMALE' : 'MALE',
           deviceFingerprint: `device_${Date.now()}`,
           platform: 'mobile',
         });
       } catch (registerError: any) {
-        // If user exists, try to login to get token
-        if (registerError.response?.status === 400 || registerError.response?.status === 401) {
+        if (registerError.response?.status === 409) {
+          const message = registerError.response.data?.message || 'Account already exists. Please log in.';
+          Alert.alert('Account Exists', message, [{ text: 'OK' }]);
+          return;
+        }
+        // For 400 validation or other errors, try login or throw
+        if (registerError.response?.status === 400) {
           await api.login(email, password);
         } else {
           throw registerError;
         }
       }
-      
-      // Navigate to ID verification with form data
+
       navigation.navigate('IDVerification', {
         formData: {
           email,
@@ -98,25 +116,23 @@ export const ProfileDetailsScreen: React.FC<ProfileDetailsScreenProps> = ({ navi
           phone,
           firstName,
           lastName,
-          dateOfBirth,
+          dateOfBirth: isoDateOfBirth,
           gender,
         },
       });
     } catch (error: any) {
       console.error('Registration error:', error);
-      // Still proceed to ID verification even if registration fails
-      // The user can complete verification and we'll handle account creation
-      navigation.navigate('IDVerification', {
-        formData: {
-          email,
-          password,
-          phone,
-          firstName,
-          lastName,
-          dateOfBirth,
-          gender,
-        },
-      });
+
+      const isNetworkError = error.message === 'Network Error' || !error.response;
+      const serverMessage = error.response?.data?.message || error.response?.data?.error;
+
+      Alert.alert(
+        'Registration Failed',
+        isNetworkError
+          ? 'Could not connect to the server. Please check your internet connection and try again.'
+          : serverMessage || 'Something went wrong. Please try again.',
+        [{ text: 'OK' }]
+      );
     } finally {
       setIsLoading(false);
     }
@@ -129,7 +145,7 @@ export const ProfileDetailsScreen: React.FC<ProfileDetailsScreenProps> = ({ navi
         style={styles.keyboardView}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
@@ -177,41 +193,29 @@ export const ProfileDetailsScreen: React.FC<ProfileDetailsScreenProps> = ({ navi
               )}
               <View style={styles.genderOptions}>
                 <TouchableOpacity
-                  style={[
-                    styles.genderButton,
-                    gender === 'MALE' && styles.genderButtonActive,
-                  ]}
+                  style={[styles.genderButton, gender === 'MALE' && styles.genderButtonActive]}
                   onPress={() => setGender('MALE')}
                 >
-                  <Ionicons 
-                    name="male" 
-                    size={24} 
-                    color={gender === 'MALE' ? COLORS.white : COLORS.primary} 
+                  <Ionicons
+                    name="male"
+                    size={24}
+                    color={gender === 'MALE' ? COLORS.white : COLORS.primary}
                   />
-                  <Text style={[
-                    styles.genderButtonText,
-                    gender === 'MALE' && styles.genderButtonTextActive,
-                  ]}>
+                  <Text style={[styles.genderButtonText, gender === 'MALE' && styles.genderButtonTextActive]}>
                     Male
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[
-                    styles.genderButton,
-                    gender === 'FEMALE' && styles.genderButtonActive,
-                  ]}
+                  style={[styles.genderButton, gender === 'FEMALE' && styles.genderButtonActive]}
                   onPress={() => setGender('FEMALE')}
                 >
-                  <Ionicons 
-                    name="female" 
-                    size={24} 
-                    color={gender === 'FEMALE' ? COLORS.white : COLORS.primary} 
+                  <Ionicons
+                    name="female"
+                    size={24}
+                    color={gender === 'FEMALE' ? COLORS.white : COLORS.primary}
                   />
-                  <Text style={[
-                    styles.genderButtonText,
-                    gender === 'FEMALE' && styles.genderButtonTextActive,
-                  ]}>
+                  <Text style={[styles.genderButtonText, gender === 'FEMALE' && styles.genderButtonTextActive]}>
                     Female
                   </Text>
                 </TouchableOpacity>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,6 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { registrationProgress } from '../../services/RegistrationProgressService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -22,17 +21,8 @@ type WelcomeScreenProps = {
 };
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
-  // Check for saved registration progress and redirect
-  useEffect(() => {
-    const checkProgress = async () => {
-      const resumeStep = await registrationProgress.getResumeStep();
-      if (resumeStep) {
-        // User has incomplete registration - redirect to where they left off
-        navigation.navigate(resumeStep.screen, { formData: resumeStep.formData });
-      }
-    };
-    checkProgress();
-  }, [navigation]);
+  // Don't automatically redirect - let users choose to resume or start fresh
+  // This prevents issues when multiple users use the same device
 
   return (
     <View style={styles.container}>

@@ -61,7 +61,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   const generateYearOptions = () => {
     const currentYear = new Date().getFullYear();
     const years = [];
-    for (let year = currentYear; year >= 1950; year--) {
+    for (let year = currentYear - 18; year >= 1900; year--) {
       years.push(year);
     }
     return years;

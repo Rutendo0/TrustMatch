@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { View, Image, StyleSheet, Platform, TouchableOpacity } from 'react-native';
-import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, Image, StyleSheet, Platform, TouchableOpacity } from 'react-native';
+import { NavigationContainer, useNavigation, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../services/api';
+import { api, authEventEmitter } from '../services/api';
 
 import { WelcomeScreen } from '../screens/auth/WelcomeScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
@@ -28,7 +28,10 @@ import { PersonalityQuizScreen } from '../screens/profile/PersonalityQuizScreen'
 import { DealbreakersScreen } from '../screens/profile/DealbreakersScreen';
 import { ProfileSetupScreen } from '../screens/profile/ProfileSetupScreen';
 import { EmailVerificationScreen } from '../screens/auth/EmailVerificationScreen';
+import { WelcomeNewUserScreen } from '../screens/main/WelcomeNewUserScreen';
+import { SafetyCenterScreen } from '../screens/main/SafetyCenterScreen';
 import { COLORS, SHADOWS } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 
 export type RootStackParamList = {
   Welcome: undefined;
@@ -49,6 +52,8 @@ export type RootStackParamList = {
   Settings: undefined;
   Filters: undefined;
   ProfileDetail: { profile: any; isOwnProfile?: boolean };
+  WelcomeNewUser: undefined;
+  SafetyCenter: undefined;
 };
 
 export type MainTabParamList = {
@@ -65,7 +70,9 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 const MainTabs = () => {
   const navigation = useNavigation<any>();
+  const { colors } = useTheme();
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const fetchUserPhoto = async () => {
@@ -78,7 +85,23 @@ const MainTabs = () => {
         console.warn('Could not fetch user photo for tab bar:', error);
       }
     };
+
+    const fetchUnreadCount = async () => {
+      try {
+        const matches = await api.getMatches();
+        const total = matches.reduce((sum: number, m: any) => {
+          return sum + (m.lastMessage && !m.lastMessage.isRead ? 1 : 0);
+        }, 0);
+        setUnreadCount(total);
+      } catch {}
+    };
+
     fetchUserPhoto();
+    fetchUnreadCount();
+
+    // Refresh unread count every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -103,11 +126,24 @@ const MainTabs = () => {
               iconName = 'ellipse';
           }
 
+          if (route.name === 'Messages' && unreadCount > 0) {
+            return (
+              <View>
+                <Ionicons name={iconName} size={size} color={color} />
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Text>
+                </View>
+              </View>
+            );
+          }
+
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textSecondary,
-        tabBarStyle: styles.tabBar,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
+        tabBarStyle: [styles.tabBar, { backgroundColor: colors.white, borderTopColor: colors.border }],
         tabBarLabelStyle: styles.tabBarLabel,
         tabBarHideOnKeyboard: true,
       })}
@@ -118,15 +154,15 @@ const MainTabs = () => {
         headerShown: true,
         headerTitle: 'Discover',
         headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: COLORS.white },
-        headerTitleStyle: { color: COLORS.text, fontWeight: 'bold', fontSize: 18 },
+        headerStyle: { backgroundColor: colors.white },
+        headerTitleStyle: { color: colors.text, fontWeight: 'bold', fontSize: 18 },
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginRight: 16 }}>
             <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
               <Ionicons 
                 name="settings-outline" 
                 size={24} 
-                color={COLORS.text} 
+                color={colors.text} 
               />
             </TouchableOpacity>
             {userPhoto ? (
@@ -141,7 +177,7 @@ const MainTabs = () => {
                 <Ionicons 
                   name="person-circle-outline" 
                   size={28} 
-                  color={COLORS.primary}
+                  color={colors.primary}
                 />
               </TouchableOpacity>
             )}
@@ -152,7 +188,7 @@ const MainTabs = () => {
             {userPhoto ? (
               <Image source={{ uri: userPhoto }} style={{ width: 36, height: 36, borderRadius: 18 }} />
             ) : (
-              <Ionicons name="person-circle" size={36} color={COLORS.primary} />
+              <Ionicons name="person-circle" size={36} color={colors.primary} />
             )}
           </View>
         ),
@@ -162,14 +198,14 @@ const MainTabs = () => {
         headerShown: true,
         headerTitle: 'Likes',
         headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: COLORS.white },
-        headerTitleStyle: { color: COLORS.text, fontWeight: 'bold', fontSize: 18 },
+        headerStyle: { backgroundColor: colors.white },
+        headerTitleStyle: { color: colors.text, fontWeight: 'bold', fontSize: 18 },
         headerRight: () => (
           <View style={{ marginRight: 16 }}>
             {userPhoto ? (
               <Image source={{ uri: userPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} />
             ) : (
-              <Ionicons name="person-circle-outline" size={28} color={COLORS.primary} />
+              <Ionicons name="person-circle-outline" size={28} color={colors.primary} />
             )}
           </View>
         ),
@@ -178,14 +214,14 @@ const MainTabs = () => {
         headerShown: true,
         headerTitle: 'Messages',
         headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: COLORS.white },
-        headerTitleStyle: { color: COLORS.text, fontWeight: 'bold', fontSize: 18 },
+        headerStyle: { backgroundColor: colors.white },
+        headerTitleStyle: { color: colors.text, fontWeight: 'bold', fontSize: 18 },
         headerRight: () => (
           <View style={{ marginRight: 16 }}>
             {userPhoto ? (
               <Image source={{ uri: userPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} />
             ) : (
-              <Ionicons name="person-circle-outline" size={28} color={COLORS.primary} />
+              <Ionicons name="person-circle-outline" size={28} color={colors.primary} />
             )}
           </View>
         ),
@@ -199,8 +235,26 @@ const MainTabs = () => {
 };
 
 export const AppNavigator = () => {
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+
+  // Global 401 handler — redirect to Welcome when token expires
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      if (navigationRef.current) {
+        navigationRef.current.reset({
+          index: 0,
+          routes: [{ name: 'Welcome' }],
+        });
+      }
+    };
+    authEventEmitter.on('unauthorized', handleUnauthorized);
+    return () => {
+      authEventEmitter.off('unauthorized', handleUnauthorized);
+    };
+  }, []);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -237,6 +291,16 @@ export const AppNavigator = () => {
           component={ProfileDetailScreen}
           options={{ animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="WelcomeNewUser"
+          component={WelcomeNewUserScreen}
+          options={{ animation: 'fade', gestureEnabled: false }}
+        />
+        <Stack.Screen
+          name="SafetyCenter"
+          component={SafetyCenterScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -255,5 +319,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     marginTop: 0,
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    backgroundColor: COLORS.error,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
 });
