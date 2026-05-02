@@ -1,0 +1,15 @@
+# Ignore local dev files
+.env
+node_modules
+dist
+logs
+uploads
+*.log
+tsconfig.tsbuildinfo
+ecosystem.config.js
+docker-compose.yml
+check-*.js
+test-*.js
+query-*.js
+delete-*.js
+fix-*.js
