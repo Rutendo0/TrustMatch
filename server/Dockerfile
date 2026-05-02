@@ -29,6 +29,7 @@ COPY . .
 # Generate Prisma client and compile TypeScript
 RUN npx prisma generate
 RUN npm run build
+RUN chmod +x start.sh
 
 # ── Production runner ────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -55,14 +56,18 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
 
+COPY --from=builder /app/start.sh ./start.sh
+
 RUN mkdir -p uploads/photos uploads/documents uploads/selfies uploads/voice-notes logs && \
+    chmod +x start.sh && \
     chown -R nodejs:nodejs /app
 
 USER nodejs
 
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+# Longer start period — migrations can take a few seconds on cold start
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "start.sh"]
