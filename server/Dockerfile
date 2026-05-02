@@ -45,7 +45,8 @@ RUN apk add --no-cache \
     jpeg \
     giflib \
     librsvg \
-    pixman
+    pixman \
+    openssl
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nodejs
