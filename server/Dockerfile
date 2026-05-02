@@ -66,8 +66,4 @@ USER nodejs
 
 EXPOSE 3000
 
-# Longer start period — migrations can take a few seconds on cold start
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
-
 CMD ["sh", "start.sh"]
