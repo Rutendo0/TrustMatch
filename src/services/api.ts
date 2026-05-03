@@ -22,7 +22,7 @@ export const authEventEmitter = new SimpleEmitter();
 
 // Use environment variable or default to localhost for development
 // For production, set EXPO_PUBLIC_API_URL in your environment
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://trustmatch-server.onrender.com/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://trustmatch-production.up.railway.app/api';
 // For external face verification API, set EXPO_PUBLIC_FACE_VERIFICATION_API_URL
 // If not set, face verification will return an error
 
