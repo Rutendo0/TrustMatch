@@ -11,6 +11,7 @@ interface AuthenticatedSocket extends Socket {
 interface ServerToClientEvents {
   newMessage: (data: { matchId: string; message: any }) => void;
   messageRead: (data: { matchId: string; userId: string }) => void;
+  messageDeleted: (data: { matchId: string; messageId: string }) => void;
   userOnline: (data: { userId: string }) => void;
   userOffline: (data: { userId: string }) => void;
   typing: (data: { matchId: string; userId: string; isTyping: boolean }) => void;
@@ -226,6 +227,10 @@ export const initializeSocket = (httpServer: HttpServer): Server<ClientToServerE
 // Helper functions to emit events from routes
 export const emitNewMessage = (matchId: string, message: any) => {
   io?.to(`match:${matchId}`).emit('newMessage', { matchId, message });
+};
+
+export const emitMessageDeleted = (matchId: string, messageId: string) => {
+  io?.to(`match:${matchId}`).emit('messageDeleted', { matchId, messageId });
 };
 
 export const emitMessageRead = (matchId: string, userId: string) => {

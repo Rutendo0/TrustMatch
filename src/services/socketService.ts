@@ -93,6 +93,11 @@ class SocketService {
     return () => this.socket?.off('messageRead', handler);
   }
 
+  onMessageDeleted(handler: (data: { matchId: string; messageId: string }) => void): () => void {
+    this.socket?.on('messageDeleted', handler);
+    return () => this.socket?.off('messageDeleted', handler);
+  }
+
   onTyping(handler: TypingHandler): () => void {
     this.socket?.on('typing', handler);
     return () => this.socket?.off('typing', handler);

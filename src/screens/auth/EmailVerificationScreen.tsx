@@ -37,6 +37,7 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
         // If email fails to send, show the code from server response
         if (response.code) {
           setDisplayedCode(response.code);
+          setCode(response.code); // auto-fill so user just taps Verify
         }
       } catch (error) {
         console.error('Failed to send verification code:', error);
@@ -94,7 +95,8 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
       // If email fails to send, show the code from server response
       if (response.code) {
         setDisplayedCode(response.code);
-        Alert.alert('Code Sent', `Your verification code is: ${response.code}`);
+        setCode(response.code);
+        Alert.alert('New Code Ready', `Your verification code is: ${response.code}`);
       } else {
         Alert.alert('Code Sent', 'A new verification code has been sent to your email.');
       }
@@ -118,8 +120,10 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
           </View>
           <Text style={styles.title}>Check Your Email</Text>
           <Text style={styles.subtitle}>
-            We've sent a 6-digit verification code to{'\n'}
-            <Text style={styles.email}>{formData.email}</Text>
+            {displayedCode
+              ? `Your verification code is shown below.\nEnter it to verify your account.`
+              : `We've sent a 6-digit code to\n`}
+            {!displayedCode && <Text style={styles.email}>{formData?.email}</Text>}
           </Text>
         </View>
 

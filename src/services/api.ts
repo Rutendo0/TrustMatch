@@ -415,6 +415,21 @@ async getProfileInsights() {
     return response.data;
   }
 
+  async deleteMessage(matchId: string, messageId: string) {
+    const response = await this.client.delete(`/messages/${matchId}/${messageId}`);
+    return response.data;
+  }
+
+  async uploadChatAudio(matchId: string, audioUri: string, duration: number) {
+    const formData = new FormData();
+    formData.append('audio', { uri: audioUri, type: 'audio/m4a', name: 'voice.m4a' } as any);
+    formData.append('duration', String(duration));
+    const response = await this.client.post(`/messages/${matchId}/audio`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
   // Email verification
   async sendEmailVerification() {
     const response = await this.client.post('/auth/send-email-verification');

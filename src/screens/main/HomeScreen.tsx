@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useLayoutEffect, useCallback } from 'react';
+﻿import React, { useState, useMemo, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -7,6 +7,7 @@ import {
   Image,
   TouchableOpacity,
   Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +19,6 @@ import { COLORS, FONTS, SPACING, BORDER_RADIUS, SHADOWS } from '../../constants/
 import { useResponsive, normalize, MIN_TOUCH_SIZE, HIT_SLOP } from '../../hooks/useResponsive';
 import { useTheme } from '../../context/ThemeContext';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-
 interface Profile {
   id: string;
   name: string;
@@ -35,77 +35,6 @@ interface Profile {
   verificationBadges: string[];
 }
 
-// Current user profile data
-const CURRENT_USER = {
-  id: 'current-user',
-  name: 'Alex',
-  age: 28,
-  photos: [
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
-  ],
-  isVerified: true,
-};
-
-const MOCK_PROFILES: Profile[] = [
-  {
-    id: '1',
-    name: 'Sarah',
-    age: 28,
-    bio: 'Coffee enthusiast ☕ | Love hiking and outdoor adventures | Looking for genuine connections',
-    distance: 'Harare',
-    photos: [
-      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
-      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
-      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400'
-    ],
-    isVerified: true,
-    trustScore: 95,
-    compatibility: 87,
-    personalityType: 'ENFP',
-    interests: ['Travel', 'Photography', 'Hiking'],
-    safetyFeatures: ['Video Verified', 'ID Checked', 'Background Check'],
-    verificationBadges: ['Identity', 'Selfie', 'Employment'],
-  },
-  {
-    id: '2',
-    name: 'Emily',
-    age: 25,
-    bio: 'Artist and dreamer 🎨 | Dog mom | Here to find my person',
-    distance: 'Bulawayo',
-    photos: [
-      'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400',
-      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400'
-    ],
-    isVerified: true,
-    trustScore: 92,
-    compatibility: 89,
-    personalityType: 'INFP',
-    interests: ['Art', 'Music', 'Dogs'],
-    safetyFeatures: ['Video Verified', 'ID Checked', 'Social Media'],
-    verificationBadges: ['Identity', 'Selfie', 'Education'],
-  },
-  {
-    id: '3',
-    name: 'Jessica',
-    age: 30,
-    bio: 'Foodie exploring the city 🍕 | Tech professional | Looking for someone to share adventures with',
-    distance: 'Mutare',
-    photos: [
-      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400',
-      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
-      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
-      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400'
-    ],
-    isVerified: true,
-    trustScore: 98,
-    compatibility: 91,
-    personalityType: 'ENTJ',
-    interests: ['Food', 'Technology', 'Travel'],
-    safetyFeatures: ['Video Verified', 'ID Checked', 'Employment', 'Background Check'],
-    verificationBadges: ['Identity', 'Selfie', 'Employment', 'Education'],
-  },
-];
-
 type HomeScreenProps = {
   navigation: NativeStackNavigationProp<any>;
 };
@@ -114,9 +43,41 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const { colors } = useTheme();
   const { width, height, wp, hp, normalize, isLandscape, isTablet } = useResponsive();
 
-  // ALL HOOKS AT TOP - NO EARLY RETURNS BEFORE THIS POINT
-  
-  // Header setup
+  // ── Stamp overlay state ──────────────────────────────────────────────────
+  const [stampAnim] = useState(new Animated.Value(0));
+  const [stampType, setStampType] = useState<'like' | 'nope' | null>(null);
+
+  // Skeleton pulse animation
+  const [skeletonAnim] = useState(new Animated.Value(0.4));
+
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(skeletonAnim, { toValue: 0.8, duration: 600, useNativeDriver: true }),
+        Animated.timing(skeletonAnim, { toValue: 0.4, duration: 600, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [skeletonAnim]);
+
+  const showStamp = useCallback(
+    (type: 'like' | 'nope', callback: () => void) => {
+      setStampType(type);
+      stampAnim.setValue(0);
+      Animated.sequence([
+        Animated.timing(stampAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
+        Animated.delay(150),
+        Animated.timing(stampAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+      ]).start(() => {
+        setStampType(null);
+        callback();
+      });
+    },
+    [stampAnim]
+  );
+
+  // ── Header ───────────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     navigation.setOptions({
       headerShown: true,
@@ -126,20 +87,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       headerTintColor: COLORS.text,
       headerRight: () => (
         <View style={{ marginRight: 16 }}>
-          <TouchableOpacity 
-            onPress={() => navigation.navigate('Filters')}
-            hitSlop={HIT_SLOP}
-          >
+          <TouchableOpacity onPress={() => navigation.navigate('Filters')} hitSlop={HIT_SLOP}>
             <Ionicons name="options-outline" size={normalize(24)} color={COLORS.text} />
           </TouchableOpacity>
         </View>
       ),
     });
   }, [navigation, normalize]);
-  
+
+  // ── Card dimensions ──────────────────────────────────────────────────────
   const cardDimensions = useMemo(() => {
     const cardHeight = isLandscape ? hp(75) : hp(60);
-    const cardWidth = isLandscape 
+    const cardWidth = isLandscape
       ? Math.min(wp(50), height * 0.65)
       : wp(100) - SPACING.lg * 2;
     return { cardHeight, cardWidth };
@@ -150,11 +109,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const responsiveFonts = useMemo(() => ({
     cardName: normalize(24),
     cardDistance: normalize(14),
-    cardBio: normalize(16),
+    cardBio: normalize(15),
     interestText: normalize(12),
     logoText: normalize(20),
-    emptyTitle: normalize(20),
-    emptySubtitle: normalize(16),
+    emptyTitle: normalize(22),
+    emptySubtitle: normalize(15),
   }), [normalize]);
 
   const responsiveIconSizes = useMemo(() => ({
@@ -164,12 +123,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     emptyState: normalize(80),
     filter: normalize(24),
     arrow: normalize(24),
-    photoIndicator: normalize(8),
   }), [normalize]);
 
   const actionButtonSize = useMemo(() => Math.max(MIN_TOUCH_SIZE, normalize(60)), [normalize]);
 
-  // All state hooks
+  // ── State ────────────────────────────────────────────────────────────────
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [likedProfiles, setLikedProfiles] = useState<string[]>([]);
@@ -179,18 +137,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [matchModal, setMatchModal] = useState<{ visible: boolean; profile: Profile | null; matchId: string | null }>({ visible: false, profile: null, matchId: null });
   const [lastDisliked, setLastDisliked] = useState<{ profile: Profile; index: number } | null>(null);
 
-  // Effects
-  useEffect(() => {
-    fetchProfiles();
-  }, []);
+  // ── Effects ──────────────────────────────────────────────────────────────
+  useEffect(() => { fetchProfiles(); }, []);
+  useFocusEffect(useCallback(() => { fetchProfiles(); }, []));
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchProfiles();
-    }, [])
-  );
-
-  // Memoized values & callbacks
+  // ── Memoised values ──────────────────────────────────────────────────────
   const currentProfile = useMemo(
     () => (profiles.length > 0 ? profiles[currentIndex] : null),
     [profiles, currentIndex]
@@ -252,57 +203,46 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       fontWeight: 'bold',
       color: COLORS.text,
       marginTop: SPACING.lg,
+      textAlign: 'center',
     },
     emptySubtitle: {
       fontSize: responsiveFonts.emptySubtitle,
       color: COLORS.textSecondary,
       textAlign: 'center',
       marginTop: SPACING.sm,
+      paddingHorizontal: SPACING.xl,
+    },
+    skeletonCard: {
+      width: cardWidth,
+      height: cardHeight,
+      borderRadius: BORDER_RADIUS.xl,
+      backgroundColor: COLORS.border,
+      overflow: 'hidden',
     },
   }), [cardWidth, cardHeight, responsiveFonts]);
 
+  // ── API / callbacks ──────────────────────────────────────────────────────
   const fetchProfiles = useCallback(async () => {
     setLoading(true);
-    console.log('Fetching discover profiles...');
-    
     try {
       let filters = {};
       try {
         const userProfile = await api.getProfile();
-        console.log('User profile loaded:', { 
-          id: userProfile?.id, 
-          firstName: userProfile?.firstName,
-          preferences: userProfile?.preferences 
-        });
-        
         filters = {
-          gender: userProfile?.preferences?.showMe,
-          ageMin: userProfile?.preferences?.ageRange?.min,
-          ageMax: userProfile?.preferences?.ageRange?.max,
+          gender: userProfile?.preferences?.interestedIn,
+          ageMin: userProfile?.preferences?.ageRangeMin ?? userProfile?.ageRangeMin,
+          ageMax: userProfile?.preferences?.ageRangeMax ?? userProfile?.ageRangeMax,
         };
-        
-        // Store my profile for the match modal
         setMyProfile({
           name: userProfile?.firstName || 'You',
           photo: userProfile?.photos?.[0]?.url || userProfile?.photos?.[0] || '',
           interests: userProfile?.interests || [],
         });
       } catch (profileError: any) {
-        console.warn('Could not fetch user preferences:', profileError);
-        console.warn('Error details:', profileError.response?.data || profileError.message);
+        console.warn('Could not fetch user preferences:', profileError.message);
       }
-      
-      console.log('Fetching profiles with filters:', filters);
       const data = await api.getDiscoverProfiles(10, filters);
-      console.log('Received profiles:', data?.length || 0);
-      
-      if (!data || data.length === 0) {
-        console.log('No profiles returned from API');
-        setProfiles([]);
-        setLoading(false);
-        return;
-      }
-      
+      if (!data || data.length === 0) { setProfiles([]); setLoading(false); return; }
       const mappedProfiles: Profile[] = (data || []).map((p: any) => ({
         id: p?.id || Math.random().toString(),
         name: p?.firstName || p?.name || 'User',
@@ -312,281 +252,277 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         photos: p?.photos?.length > 0 ? p.photos : ['https://via.placeholder.com/400'],
         isVerified: p?.isVerified || false,
         trustScore: p?.trustScore || 85,
-        compatibility: Math.floor(Math.random() * 30) + 70,
+        compatibility: p?.compatibility || p?.trustScore || Math.floor(Math.random() * 20) + 75,
         personalityType: 'N/A',
         interests: p?.interests || [],
         safetyFeatures: p?.isVerified ? ['Verified'] : [],
         verificationBadges: p?.isVerified ? ['Identity', 'Selfie'] : [],
       }));
-      
-      console.log('Mapped profiles:', mappedProfiles.length);
       setProfiles(mappedProfiles);
     } catch (error: any) {
-      console.error('Failed to fetch profiles:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-      });
-      
-      // Check if it's a verification error
       if (error.response?.status === 403) {
-        Alert.alert(
-          'Verification Required',
-          'Please complete all verification steps to start discovering profiles.',
-          [
-            { text: 'Complete Verification', onPress: () => navigation.navigate('ProfileSetup', { formData: {} }) },
-            { text: 'Later' }
-          ]
-        );
+        Alert.alert('Verification Required', 'Please complete all verification steps to start discovering profiles.', [
+          { text: 'Complete Verification', onPress: () => navigation.navigate('ProfileSetup', { formData: {} }) },
+          { text: 'Later' },
+        ]);
       } else {
-        // Show user-friendly error
-        Alert.alert(
-          'Could Not Load Profiles',
-          error.response?.data?.error || error.message || 'Please check your connection and try again.',
-          [
-            { text: 'Retry', onPress: () => fetchProfiles() },
-            { text: 'Cancel' }
-          ]
-        );
+        Alert.alert('Could Not Load Profiles', error.response?.data?.error || error.message || 'Please check your connection and try again.', [
+          { text: 'Retry', onPress: () => fetchProfiles() },
+          { text: 'Cancel' },
+        ]);
       }
-      
       setProfiles([]);
     } finally {
       setLoading(false);
     }
   }, [navigation]);
 
+  const goToNext = useCallback(() => {
+    if (currentIndex < profiles.length - 1) { setCurrentIndex(prev => prev + 1); setCurrentPhotoIndex(0); }
+  }, [currentIndex, profiles.length]);
+
   const handleLike = useCallback(async () => {
     if (!currentProfile) return;
-    
-    console.log('Liking profile:', currentProfile.id);
     setLikedProfiles(prev => [...prev, currentProfile.id]);
-    
     try {
       const result = await api.swipe(currentProfile.id, 'LIKE');
-      console.log('Like result:', result);
-      
-      // If it's a mutual match, show the match modal
       if (result?.isMatch) {
         setMatchModal({ visible: true, profile: currentProfile, matchId: result.matchId || null });
       } else {
-        // No match, just move to next profile
         goToNext();
       }
     } catch (error: any) {
-      console.error('Failed to swipe:', error);
-      console.error('Error details:', error.response?.data || error.message);
-      
-      // Show error to user
-      Alert.alert(
-        'Like Failed',
-        error.response?.data?.error || error.message || 'Could not like this profile. Please try again.',
-        [{ text: 'OK' }]
-      );
-      
-      // Remove from liked profiles since it failed
+      Alert.alert('Like Failed', error.response?.data?.error || error.message || 'Could not like this profile.', [{ text: 'OK' }]);
       setLikedProfiles(prev => prev.filter(id => id !== currentProfile.id));
     }
   }, [currentProfile, goToNext]);
 
   const handleDislike = useCallback(async () => {
     if (!currentProfile) return;
-    // Save for undo
     setLastDisliked({ profile: currentProfile, index: currentIndex });
-    try {
-      await api.swipe(currentProfile.id, 'DISLIKE');
-    } catch (error) {
-      console.error('Failed to swipe:', error);
-    }
+    try { await api.swipe(currentProfile.id, 'DISLIKE'); } catch (error) { console.error('Failed to swipe:', error); }
     goToNext();
-  }, [currentProfile, currentIndex]);
+  }, [currentProfile, currentIndex, goToNext]);
 
   const handleUndo = useCallback(async () => {
     if (!lastDisliked) return;
-    // Re-insert the disliked profile at current position
-    setProfiles(prev => {
-      const updated = [...prev];
-      updated.splice(currentIndex, 0, lastDisliked.profile);
-      return updated;
-    });
+    setProfiles(prev => { const updated = [...prev]; updated.splice(currentIndex, 0, lastDisliked.profile); return updated; });
     setLastDisliked(null);
   }, [lastDisliked, currentIndex]);
 
-  const goToNext = useCallback(() => {
-    if (currentIndex < profiles.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-      setCurrentPhotoIndex(0);
-    }
-  }, [currentIndex, profiles.length]);
-
-  const goToPrevious = useCallback(() => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1);
-      setCurrentPhotoIndex(0);
-    }
-  }, [currentIndex]);
-
   const viewFullProfile = useCallback(() => {
-    if (currentProfile) {
-      navigation.navigate('ProfileDetail', { profile: currentProfile });
-    }
+    if (currentProfile) navigation.navigate('ProfileDetail', { profile: currentProfile });
   }, [currentProfile, navigation]);
 
   const nextPhoto = useCallback(() => {
-    if (currentProfile! && currentPhotoIndex < currentProfile!.photos.length - 1) {
-      setCurrentPhotoIndex(prev => prev + 1);
-    }
+    if (currentProfile && currentPhotoIndex < currentProfile.photos.length - 1) setCurrentPhotoIndex(prev => prev + 1);
   }, [currentPhotoIndex, currentProfile]);
 
   const previousPhoto = useCallback(() => {
-    if (currentPhotoIndex > 0) {
-      setCurrentPhotoIndex(prev => prev - 1);
-    }
+    if (currentPhotoIndex > 0) setCurrentPhotoIndex(prev => prev - 1);
   }, [currentPhotoIndex]);
 
-  // NOW EARLY RETURNS ARE SAFE - ALL HOOKS HAVE RUN
+  // ── Progress bar value ───────────────────────────────────────────────────
+  const progressFraction = profiles.length > 0 ? (currentIndex + 1) / profiles.length : 0;
 
+  // ── NOW EARLY RETURNS ARE SAFE — ALL HOOKS HAVE RUN ─────────────────────
+
+  // Loading skeleton
   if (loading) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading profiles...</Text>
+        <View style={styles.contentContainer}>
+          <Animated.View style={[dynamicStyles.skeletonCard, { opacity: skeletonAnim }]}>
+            {/* shimmer rows at bottom */}
+            <View style={styles.skeletonInfo}>
+              <View style={styles.skeletonLine} />
+              <View style={[styles.skeletonLine, styles.skeletonLineShort]} />
+              <View style={[styles.skeletonLine, styles.skeletonLineMedium]} />
+            </View>
+          </Animated.View>
         </View>
       </SafeAreaView>
     );
   }
 
+  // Empty state
   if (profiles.length === 0 || currentIndex >= profiles.length) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>No more profiles nearby</Text>
-          <Text style={styles.subText}>Check back later for new matches</Text>
+        <View style={styles.emptyContainer}>
+          <Ionicons name="heart-dislike-outline" size={responsiveIconSizes.emptyState} color={COLORS.textLight} />
+          <Text style={dynamicStyles.emptyTitle}>You've seen everyone!</Text>
+          <Text style={dynamicStyles.emptySubtitle}>Check back later or adjust your filters</Text>
+          <TouchableOpacity style={styles.refreshButton} onPress={fetchProfiles} hitSlop={HIT_SLOP}>
+            <Text style={styles.refreshButtonText}>Refresh</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // MAIN RENDER
+  // ── MAIN RENDER ──────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top', 'left', 'right']}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          hitSlop={HIT_SLOP}
-          onPress={() => navigation.navigate('Profile')}
-        >
+        <TouchableOpacity hitSlop={HIT_SLOP} onPress={() => navigation.navigate('Profile')}>
           <View style={styles.profilePicContainer}>
             <Image
-              source={{ uri: CURRENT_USER.photos[0] }}
+              source={{ uri: myProfile?.photo || 'https://via.placeholder.com/40' }}
               style={dynamicStyles.profilePic}
             />
-            {CURRENT_USER.isVerified && (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
-              </View>
-            )}
           </View>
         </TouchableOpacity>
         <View style={styles.logoContainer}>
           <Text style={dynamicStyles.logoText}>TrustMatch</Text>
         </View>
-        <TouchableOpacity 
-          style={dynamicStyles.headerButton} 
-          hitSlop={HIT_SLOP}
-          onPress={() => navigation.navigate('Filters')}
-        >
+        <TouchableOpacity style={dynamicStyles.headerButton} hitSlop={HIT_SLOP} onPress={() => navigation.navigate('Filters')}>
           <Ionicons name="options" size={responsiveIconSizes.filter} color={COLORS.text} />
         </TouchableOpacity>
       </View>
 
+      {/* Card area */}
       <View style={styles.contentContainer}>
-        <TouchableOpacity 
-          style={[dynamicStyles.card, styles.profileCard]} 
-          onPress={viewFullProfile}
-          activeOpacity={0.9}
-        >
+        <View style={[dynamicStyles.card, styles.profileCard]}>
+          {/* Photo */}
           <Image
             source={{ uri: currentProfile.photos[currentPhotoIndex] }}
             style={styles.cardImage}
           />
-          
+
+          {/* Gradient overlay */}
           <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.8)']}
+            colors={['transparent', 'rgba(0,0,0,0.85)']}
             style={styles.cardGradient}
           />
 
+          {/* Photo indicators */}
           {currentProfile.photos.length > 1 && (
             <View style={styles.photoIndicators}>
               {currentProfile.photos.map((_, index) => (
                 <View
                   key={index}
-                  style={[
-                    styles.photoIndicator,
-                    index === currentPhotoIndex && styles.activePhotoIndicator
-                  ]}
+                  style={[styles.photoIndicator, index === currentPhotoIndex && styles.activePhotoIndicator]}
                 />
               ))}
             </View>
           )}
 
+          {/* Arrow buttons (kept alongside tap zones) */}
           {currentProfile.photos.length > 1 && (
             <>
               {currentPhotoIndex > 0 && (
-                <TouchableOpacity 
-                  style={styles.photoArrowLeft} 
-                  onPress={previousPhoto}
-                  hitSlop={HIT_SLOP}
-                >
+                <TouchableOpacity style={styles.photoArrowLeft} onPress={previousPhoto} hitSlop={HIT_SLOP}>
                   <Ionicons name="chevron-back" size={responsiveIconSizes.arrow} color={COLORS.white} />
                 </TouchableOpacity>
               )}
               {currentPhotoIndex < currentProfile.photos.length - 1 && (
-                <TouchableOpacity 
-                  style={styles.photoArrowRight} 
-                  onPress={nextPhoto}
-                  hitSlop={HIT_SLOP}
-                >
+                <TouchableOpacity style={styles.photoArrowRight} onPress={nextPhoto} hitSlop={HIT_SLOP}>
                   <Ionicons name="chevron-forward" size={responsiveIconSizes.arrow} color={COLORS.white} />
                 </TouchableOpacity>
               )}
             </>
           )}
 
+          {/* ── Tap zones overlay (top 60% of card) ── */}
+          <View style={styles.tapZoneContainer} pointerEvents="box-none">
+            {/* Left 40% — photo prev / card dislike */}
+            <TouchableOpacity
+              style={styles.tapZoneLeft}
+              activeOpacity={1}
+              onPress={() => {
+                // top half of card = previous photo; bottom half = dislike stamp
+                previousPhoto();
+              }}
+              onLongPress={() => showStamp('nope', handleDislike)}
+            />
+            {/* Middle 20% — view full profile */}
+            <TouchableOpacity
+              style={styles.tapZoneMiddle}
+              activeOpacity={1}
+              onPress={viewFullProfile}
+            />
+            {/* Right 40% — photo next / card like */}
+            <TouchableOpacity
+              style={styles.tapZoneRight}
+              activeOpacity={1}
+              onPress={() => {
+                nextPhoto();
+              }}
+              onLongPress={() => showStamp('like', handleLike)}
+            />
+          </View>
+
+          {/* ── Full-card tap zones (bottom 40% of card height) for like/dislike ── */}
+          <View style={styles.tapZoneBottomContainer} pointerEvents="box-none">
+            <TouchableOpacity
+              style={styles.tapZoneBottomLeft}
+              activeOpacity={1}
+              onPress={() => showStamp('nope', handleDislike)}
+            />
+            <TouchableOpacity
+              style={styles.tapZoneBottomMiddle}
+              activeOpacity={1}
+              onPress={viewFullProfile}
+            />
+            <TouchableOpacity
+              style={styles.tapZoneBottomRight}
+              activeOpacity={1}
+              onPress={() => showStamp('like', handleLike)}
+            />
+          </View>
+
+          {/* ── Stamp overlay ── */}
+          {stampType !== null && (
+            <Animated.View
+              style={[
+                styles.stampOverlay,
+                stampType === 'like' ? styles.stampLike : styles.stampNope,
+                {
+                  opacity: stampAnim,
+                  transform: [{ rotate: stampType === 'like' ? '-15deg' : '15deg' }],
+                },
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={styles.stampText}>
+                {stampType === 'like' ? 'LIKE' : 'NOPE'}
+              </Text>
+              <Text style={styles.stampEmoji}>{stampType === 'like' ? '' : 'x'}</Text>
+            </Animated.View>
+          )}
+
+          {/* Card info */}
           <View style={styles.cardInfo}>
+            {/* Name + verified */}
             <View style={styles.nameRow}>
               <Text style={dynamicStyles.cardName}>{currentProfile.name}, {currentProfile.age}</Text>
               {currentProfile.isVerified && <VerifiedBadge isVerified size="medium" />}
             </View>
-            
+
+            {/* Trust score + compatibility */}
             <View style={styles.trustRow}>
               <View style={styles.trustScore}>
-                <Ionicons name="shield-checkmark" size={16} color={COLORS.trustScore} />
+                <Ionicons name="shield-checkmark" size={14} color={COLORS.white} />
                 <Text style={styles.trustScoreText}>{currentProfile.trustScore}% Trusted</Text>
               </View>
               <View style={styles.compatibility}>
-                <Ionicons name="heart" size={16} color={COLORS.secondary} />
+                {/* Colored dot instead of heart icon */}
+                <View style={styles.compatibilityDot} />
                 <Text style={styles.compatibilityText}>{currentProfile.compatibility}% Match</Text>
               </View>
             </View>
-            
+
+            {/* Location */}
             <Text style={dynamicStyles.cardDistance}>
               <Ionicons name="location" size={responsiveIconSizes.location} color={COLORS.white} /> {currentProfile.distance}
             </Text>
-            
-            <Text style={styles.personalityType}>{currentProfile.personalityType}</Text>
-            
+
+            {/* Bio — 2 lines, no personalityType */}
             <Text style={dynamicStyles.cardBio} numberOfLines={2}>{currentProfile.bio}</Text>
-            
-            <View style={styles.safetyRow}>
-              {currentProfile.safetyFeatures.slice(0, 3).map((feature, i) => (
-                <View key={i} style={styles.safetyBadge}>
-                  <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
-                  <Text style={styles.safetyText}>{feature}</Text>
-                </View>
-              ))}
-            </View>
-            
+
+            {/* Interests */}
             <View style={styles.interestsRow}>
               {currentProfile.interests.slice(0, 3).map((interest, i) => (
                 <View key={i} style={styles.interestTag}>
@@ -595,11 +531,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               ))}
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       </View>
 
+      {/* Progress bar */}
+      <View style={styles.progressBarContainer}>
+        <View style={styles.progressBarTrack}>
+          <View style={[styles.progressBarFill, { width: `${progressFraction * 100}%` as any }]} />
+        </View>
+      </View>
+
+      {/* Action buttons — no super like */}
       <View style={styles.actionContainer}>
-        {/* Undo button */}
+        {/* Undo */}
         <TouchableOpacity
           style={[styles.actionBtn, styles.undoBtn, !lastDisliked && styles.actionBtnDisabled]}
           onPress={handleUndo}
@@ -610,41 +554,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         </TouchableOpacity>
 
         {/* Dislike */}
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.dislikeBtn]}
-          onPress={handleDislike}
-          hitSlop={HIT_SLOP}
-        >
+        <TouchableOpacity style={[styles.actionBtn, styles.dislikeBtn]} onPress={handleDislike} hitSlop={HIT_SLOP}>
           <Ionicons name="close" size={responsiveIconSizes.actionLarge} color={COLORS.error} />
         </TouchableOpacity>
 
-        {/* Like */}
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.likeBtn]}
-          onPress={handleLike}
-          hitSlop={HIT_SLOP}
-        >
+        {/* Like — larger, stronger glow */}
+        <TouchableOpacity style={[styles.actionBtn, styles.likeBtn]} onPress={handleLike} hitSlop={HIT_SLOP}>
           <Ionicons name="heart" size={responsiveIconSizes.actionLarge} color={COLORS.white} />
         </TouchableOpacity>
-
-        {/* Super like */}
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.superLikeBtn]}
-          onPress={async () => {
-            if (!currentProfile) return;
-            try { await api.swipe(currentProfile.id, 'SUPERLIKE'); } catch {}
-            goToNext();
-          }}
-          hitSlop={HIT_SLOP}
-        >
-          <Ionicons name="star" size={22} color={COLORS.info} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.counterContainer}>
-        <Text style={styles.counterText}>
-          {currentIndex + 1} of {profiles.length}
-        </Text>
       </View>
 
       {/* Match Modal */}
@@ -682,25 +599,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-  },
-  loadingText: {
-    fontSize: normalize(FONTS.sizes.lg),
-    color: COLORS.text,
-    marginBottom: normalize(SPACING.sm),
-  },
-  subText: {
-    fontSize: normalize(FONTS.sizes.md),
-    color: COLORS.textSecondary,
-  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
+
+  // ── Header ──────────────────────────────────────────────────────────────
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -712,6 +616,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  profilePicContainer: {
+    position: 'relative',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Content ──────────────────────────────────────────────────────────────
   contentContainer: {
     flex: 1,
     alignItems: 'center',
@@ -731,51 +651,134 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '50%',
+    height: '55%',
   },
+
+  // ── Photo indicators ─────────────────────────────────────────────────────
   photoIndicators: {
     position: 'absolute',
-    bottom: 20,
-    left: 0,
-    right: 0,
+    top: SPACING.sm,
+    left: SPACING.sm,
+    right: SPACING.sm,
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
+    gap: 4,
   },
   photoIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    flex: 1,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
   activePhotoIndicator: {
     backgroundColor: COLORS.white,
   },
+
+  // ── Arrow buttons ────────────────────────────────────────────────────────
   photoArrowLeft: {
     position: 'absolute',
-    left: 16,
-    top: '50%',
+    left: 12,
+    top: '40%',
     transform: [{ translateY: -20 }],
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   photoArrowRight: {
     position: 'absolute',
-    right: 16,
-    top: '50%',
+    right: 12,
+    top: '40%',
     transform: [{ translateY: -20 }],
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  // ── Tap zones (top 60% of card — photo navigation) ───────────────────────
+  tapZoneContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '60%',
+    flexDirection: 'row',
+  },
+  tapZoneLeft: {
+    width: '40%',
+    height: '100%',
+  },
+  tapZoneMiddle: {
+    width: '20%',
+    height: '100%',
+  },
+  tapZoneRight: {
+    width: '40%',
+    height: '100%',
+  },
+
+  // ── Tap zones (bottom 40% of card — like/dislike) ────────────────────────
+  tapZoneBottomContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '40%',
+    flexDirection: 'row',
+  },
+  tapZoneBottomLeft: {
+    width: '40%',
+    height: '100%',
+  },
+  tapZoneBottomMiddle: {
+    width: '20%',
+    height: '100%',
+  },
+  tapZoneBottomRight: {
+    width: '40%',
+    height: '100%',
+  },
+
+  // ── Stamp overlay ────────────────────────────────────────────────────────
+  stampOverlay: {
+    position: 'absolute',
+    top: '30%',
+    alignSelf: 'center',
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  stampLike: {
+    backgroundColor: 'rgba(16, 185, 129, 0.85)',
+    borderColor: '#10B981',
+    left: '10%',
+  },
+  stampNope: {
+    backgroundColor: 'rgba(220, 38, 38, 0.85)',
+    borderColor: COLORS.error,
+    right: '10%',
+  },
+  stampText: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: COLORS.white,
+    letterSpacing: 2,
+  },
+  stampEmoji: {
+    fontSize: 22,
+    color: COLORS.white,
+    fontWeight: 'bold',
+  },
+
+  // ── Card info ────────────────────────────────────────────────────────────
   cardInfo: {
     position: 'absolute',
     bottom: 0,
@@ -791,15 +794,16 @@ const styles = StyleSheet.create({
   },
   trustRow: {
     flexDirection: 'row',
-    gap: SPACING.md,
+    gap: SPACING.sm,
     marginBottom: SPACING.xs,
+    flexWrap: 'wrap',
   },
   trustScore: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.xs,
     backgroundColor: 'rgba(99, 102, 241, 0.9)',
-    paddingVertical: SPACING.xs,
+    paddingVertical: 4,
     paddingHorizontal: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
   },
@@ -813,75 +817,58 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.xs,
     backgroundColor: 'rgba(236, 72, 153, 0.9)',
-    paddingVertical: SPACING.xs,
+    paddingVertical: 4,
     paddingHorizontal: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
+  },
+  compatibilityDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FDE68A',
   },
   compatibilityText: {
     color: COLORS.white,
     fontSize: 12,
     fontWeight: '600',
   },
-  personalityType: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: SPACING.xs,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-    alignSelf: 'flex-start',
-  },
-  safetyRow: {
-    flexDirection: 'row',
-    gap: SPACING.xs,
-    marginBottom: SPACING.sm,
-  },
-  safetyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    backgroundColor: 'rgba(16, 185, 129, 0.9)',
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  safetyText: {
-    color: COLORS.white,
-    fontSize: 10,
-    fontWeight: '600',
-  },
   interestsRow: {
     flexDirection: 'row',
     gap: SPACING.sm,
+    flexWrap: 'wrap',
   },
   interestTag: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     paddingVertical: SPACING.xs,
     paddingHorizontal: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
   },
-  profilePicContainer: {
-    position: 'relative',
+
+  // ── Progress bar ─────────────────────────────────────────────────────────
+  progressBarContainer: {
+    paddingHorizontal: SPACING.xl,
+    paddingBottom: SPACING.sm,
   },
-  verifiedBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
+  progressBarTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    overflow: 'hidden',
   },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: COLORS.primary,
+  },
+
+  // ── Action buttons ───────────────────────────────────────────────────────
   actionContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: SPACING.lg,
-    gap: SPACING.md,
+    paddingVertical: SPACING.md,
+    paddingBottom: SPACING.lg,
+    gap: SPACING.lg,
   },
   actionBtn: {
     alignItems: 'center',
@@ -893,8 +880,8 @@ const styles = StyleSheet.create({
     opacity: 0.35,
   },
   undoBtn: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
     backgroundColor: COLORS.white,
     borderWidth: 1.5,
     borderColor: COLORS.warning,
@@ -907,25 +894,58 @@ const styles = StyleSheet.create({
     borderColor: COLORS.error,
   },
   likeBtn: {
-    width: 76,
-    height: 76,
+    width: 80,
+    height: 80,
     backgroundColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+
+  // ── Empty state ──────────────────────────────────────────────────────────
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  refreshButton: {
+    marginTop: SPACING.xl,
+    backgroundColor: COLORS.primary,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.xxl,
+    borderRadius: BORDER_RADIUS.full,
     ...SHADOWS.glow,
   },
-  superLikeBtn: {
-    width: 48,
-    height: 48,
-    backgroundColor: COLORS.white,
-    borderWidth: 1.5,
-    borderColor: COLORS.info,
+  refreshButtonText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '700',
   },
-  counterContainer: {
-    alignItems: 'center',
-    paddingBottom: SPACING.lg,
+
+  // ── Skeleton loader ──────────────────────────────────────────────────────
+  skeletonInfo: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: SPACING.lg,
+    gap: SPACING.sm,
   },
-  counterText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
+  skeletonLine: {
+    height: 16,
+    borderRadius: BORDER_RADIUS.sm,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    width: '70%',
+  },
+  skeletonLineShort: {
+    width: '40%',
+    height: 12,
+  },
+  skeletonLineMedium: {
+    width: '55%',
+    height: 12,
   },
 });

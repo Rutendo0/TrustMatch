@@ -358,8 +358,6 @@ export const LikesScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
         <View style={styles.statsDivider} />
         <StatPill icon="heart" iconColor={COLORS.primary} value={totalReceived} label="Likes" trend={insights?.likesTrend} />
         <View style={styles.statsDivider} />
-        <StatPill icon="star" iconColor={COLORS.warning} value={insights?.superLikesReceived ?? 0} label="Super" />
-        <View style={styles.statsDivider} />
         <StatPill icon="people" iconColor={COLORS.success} value={insights?.totalMatches ?? 0} label="Matches" />
       </View>
 

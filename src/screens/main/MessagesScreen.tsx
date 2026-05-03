@@ -40,78 +40,6 @@ interface Match {
   isNew?: boolean;
 }
 
-const MOCK_MATCHES: Match[] = [
-  {
-    id: '1',
-    name: 'Sarah',
-    photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100',
-    isVerified: true,
-    trustScore: 95,
-    aiModerationEnabled: true,
-    safetyLevel: 'high',
-    lastMessage: "Hey! How's your day going? 😊",
-    lastMessageTime: '2m ago',
-    unreadCount: 2,
-    isOnline: true,
-  },
-  {
-    id: '2',
-    name: 'Emily',
-    photo: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100',
-    isVerified: true,
-    trustScore: 92,
-    aiModerationEnabled: true,
-    safetyLevel: 'high',
-    lastMessage: 'That sounds amazing! Would love to go',
-    lastMessageTime: '1h ago',
-    isOnline: true,
-  },
-  {
-    id: '3',
-    name: 'Jessica',
-    photo: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=100',
-    isVerified: true,
-    trustScore: 98,
-    aiModerationEnabled: true,
-    safetyLevel: 'high',
-    lastMessage: 'See you tomorrow!',
-    lastMessageTime: 'Yesterday',
-  },
-];
-
-const NEW_MATCHES: Match[] = [
-  {
-    id: '4',
-    name: 'Amanda',
-    photo: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100',
-    isVerified: true,
-    trustScore: 88,
-    aiModerationEnabled: true,
-    safetyLevel: 'medium',
-    isNew: true,
-  },
-  {
-    id: '5',
-    name: 'Rachel',
-    photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-    isVerified: true,
-    trustScore: 91,
-    aiModerationEnabled: true,
-    safetyLevel: 'high',
-    isNew: true,
-  },
-  {
-    id: '6',
-    name: 'Nicole',
-    photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
-    isVerified: true,
-    trustScore: 94,
-    aiModerationEnabled: true,
-    safetyLevel: 'high',
-    isNew: true,
-  },
-];
-
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) => {
   const { colors } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,6 +48,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState<string>('');
   const searchInputRef = useRef<TextInput>(null);
   const { normalize: rNormalize } = useResponsive();
 
@@ -134,22 +63,33 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
     if (isRefresh) setRefreshing(true);
     setError(null);
     try {
+      // Get current user ID to avoid showing unread badge for own messages
+      let currentUserId = myUserId;
+      if (!currentUserId) {
+        try {
+          const me = await api.getProfile();
+          currentUserId = me.id;
+          setMyUserId(me.id);
+        } catch {}
+      }
+
       const data = await api.getMatches();
       const newMatchesList: Match[] = [];
       const conversationsList: Match[] = [];
       
       data.forEach((m: any) => {
+        const sentByOther = m.lastMessage?.senderId && m.lastMessage.senderId !== currentUserId;
         const match: Match = {
           id: m.id,
           name: m.user?.firstName || 'User',
-          photo: m.user?.photo || 'https://via.placeholder.com/100',
+          photo: m.user?.photo || m.user?.photos?.[0]?.url || m.user?.photos?.[0] || 'https://via.placeholder.com/100',
           isVerified: m.user?.isVerified || false,
           trustScore: 85,
           aiModerationEnabled: true,
           safetyLevel: 'high' as const,
           lastMessage: m.lastMessage?.content || undefined,
           lastMessageTime: m.lastMessage?.sentAt ? formatTime(m.lastMessage.sentAt) : '',
-          unreadCount: m.lastMessage && !m.lastMessage.isRead ? 1 : 0,
+          unreadCount: (m.lastMessage && !m.lastMessage.isRead && sentByOther) ? 1 : 0,
           isOnline: m.user?.isOnline || false,
         };
         
@@ -298,26 +238,6 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
               </Text>
             </View>
           )}
-          
-          {/* Trust Score Indicator */}
-          <View style={styles.trustIndicator}>
-            <Ionicons name="shield-checkmark" size={12} color={COLORS.trustScore} />
-            <Text style={styles.trustScoreText}>{item.trustScore}%</Text>
-          </View>
-          
-          {/* AI Moderation Status */}
-          {item.aiModerationEnabled && (
-            <View style={styles.aiModerationBadge}>
-              <Ionicons name="chatbubble-ellipses" size={10} color={COLORS.success} />
-            </View>
-          )}
-          
-          {/* Video Call & Audio Indicators */}
-          <View style={styles.communicationIndicators}>
-            <TouchableOpacity style={styles.videoCallIndicator} hitSlop={HIT_SLOP}>
-              <Ionicons name="videocam" size={14} color={COLORS.primary} />
-            </TouchableOpacity>
-          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -329,12 +249,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
         <Text style={[styles.headerTitle, { fontSize: normalize(FONTS.sizes.xxl), color: colors.text }]}>Messages</Text>
       </View>
       
-      {/* Safety Status Bar */}
-      <View style={styles.safetyStatusBar}>
-        <Ionicons name="shield-checkmark" size={16} color={COLORS.success} />
-        <Text style={styles.safetyStatusText}>AI Moderation Active • All messages are monitored for safety</Text>
-        <View style={styles.safetyIndicator} />
-      </View>
+      
 
       <View style={[styles.searchContainer, { minHeight: MIN_TOUCH_SIZE }]}>
         <Ionicons name="search" size={normalize(20)} color={COLORS.textSecondary} />

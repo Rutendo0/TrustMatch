@@ -135,9 +135,19 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       ]);
       console.log('Profile data for preferences:', JSON.stringify(profile, null, 2));
 
-      // Get age range - check both nested preferences and top-level fields
-      const ageMin = profile.preferences?.ageRangeMin ?? profile.ageRangeMin ?? 21;
-      const ageMax = profile.preferences?.ageRangeMax ?? profile.ageRangeMax ?? 50;
+      // Parse stored filters first so we can use them for ageRange fallback
+      let storedFilters: Partial<FilterState> = {};
+      if (storedFiltersRaw) {
+        try {
+          storedFilters = JSON.parse(storedFiltersRaw) ?? {};
+        } catch (parseError) {
+          console.warn('Failed to parse saved filters, using defaults:', parseError);
+        }
+      }
+
+      // Get age range — prefer locally stored (user explicitly set), fall back to API
+      const ageMin = storedFilters?.ageRange?.[0] ?? profile.preferences?.ageRangeMin ?? profile.ageRangeMin ?? 18;
+      const ageMax = storedFilters?.ageRange?.[1] ?? profile.preferences?.ageRangeMax ?? profile.ageRangeMax ?? 50;
 
       // Set showMe based on saved preference or user's gender
       let defaultShowMe: 'Men' | 'Women';
@@ -147,15 +157,6 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         defaultShowMe = profile.gender === 'FEMALE' ? 'Men' : 'Women';
       } else {
         defaultShowMe = 'Men';
-      }
-
-      let storedFilters: Partial<FilterState> = {};
-      if (storedFiltersRaw) {
-        try {
-          storedFilters = JSON.parse(storedFiltersRaw);
-        } catch (parseError) {
-          console.warn('Failed to parse saved filters, using defaults:', parseError);
-        }
       }
 
       const profileInterests = Array.isArray(profile.interests) ? profile.interests : [];
@@ -213,10 +214,11 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         interests: filters.interests,
       });
 
-      // Persist all filter fields locally
+      // Persist all filter fields locally including ageRange
       await SecureStore.setItemAsync(
         FILTER_PREFERENCES_KEY,
         JSON.stringify({
+          ageRange: filters.ageRange,
           currentCity: filters.currentCity.trim(),
           additionalCity1: filters.additionalCity1.trim(),
           additionalCity2: filters.additionalCity2.trim(),
@@ -234,7 +236,11 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       console.error('Failed to save preferences:', error);
     }
     setHasChanges(false);
-    navigation.goBack();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('MainTabs' as any);
+    }
   };
 
   return (
@@ -242,7 +248,7 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs' as any)}
         >
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
@@ -433,7 +439,6 @@ export const FilterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           onPress={applyFilters}
           size="large"
           style={styles.applyButton}
-          disabled={!hasChanges}
         />
       </View>
     </SafeAreaView>

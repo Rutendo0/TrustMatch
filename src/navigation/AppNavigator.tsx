@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, Platform, TouchableOpacity } from 'react-native';
+import { View, Text, Image, StyleSheet, Platform, TouchableOpacity, Alert } from 'react-native';
 import { NavigationContainer, useNavigation, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -88,9 +88,11 @@ const MainTabs = () => {
 
     const fetchUnreadCount = async () => {
       try {
-        const matches = await api.getMatches();
+        const [matches, me] = await Promise.all([api.getMatches(), api.getProfile()]);
+        const myId = me?.id;
         const total = matches.reduce((sum: number, m: any) => {
-          return sum + (m.lastMessage && !m.lastMessage.isRead ? 1 : 0);
+          const sentByOther = m.lastMessage?.senderId && m.lastMessage.senderId !== myId;
+          return sum + (m.lastMessage && !m.lastMessage.isRead && sentByOther ? 1 : 0);
         }, 0);
         setUnreadCount(total);
       } catch {}
@@ -245,6 +247,14 @@ export const AppNavigator = () => {
           index: 0,
           routes: [{ name: 'Welcome' }],
         });
+        // Small delay so the navigation completes before showing the alert
+        setTimeout(() => {
+          Alert.alert(
+            'Session Expired',
+            'Your session has expired. Please log in again.',
+            [{ text: 'OK' }]
+          );
+        }, 300);
       }
     };
     authEventEmitter.on('unauthorized', handleUnauthorized);

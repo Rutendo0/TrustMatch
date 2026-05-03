@@ -1,8 +1,11 @@
 import { Router, Response } from 'express';
 import { body, validationResult } from 'express-validator';
+import multer from 'multer';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
+import { emitMessageDeleted } from '../services/socketService';
+import { cloudinary } from '../lib/cloudinary';
 
 const router = Router();
 
@@ -124,6 +127,94 @@ router.post(
     }
   }
 );
+
+// ── POST /api/messages/:matchId/audio — upload audio and create message ──────
+const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+router.post('/:matchId/audio', audioUpload.single('audio'), async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { matchId } = req.params;
+    const { duration } = req.body;
+
+    if (!req.file) throw new AppError('Audio file required', 400);
+
+    const match = await prisma.match.findFirst({
+      where: { id: matchId, OR: [{ user1Id: userId }, { user2Id: userId }], isActive: true },
+    });
+    if (!match) throw new AppError('Match not found', 404);
+
+    // Upload to Cloudinary
+    const uploadResult = await new Promise<any>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: 'trustmatch/chat-audio', resource_type: 'video' },
+        (error, result) => { if (error) reject(error); else resolve(result); }
+      );
+      stream.end(req.file!.buffer);
+    });
+
+    const message = await prisma.message.create({
+      data: {
+        matchId,
+        senderId: userId,
+        content: uploadResult.secure_url,
+        type: 'VOICE_NOTE' as any,
+      },
+    });
+
+    res.status(201).json({
+      id: message.id,
+      audioUrl: uploadResult.secure_url,
+      duration: parseInt(duration) || 0,
+    });
+  } catch (error) {
+    if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message });
+    console.error('Audio upload error:', error);
+    res.status(500).json({ error: 'Failed to upload audio' });
+  }
+});
+
+router.delete('/:matchId/:messageId', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { matchId, messageId } = req.params;
+
+    // Verify user is part of this match
+    const match = await prisma.match.findFirst({
+      where: {
+        id: matchId,
+        OR: [{ user1Id: userId }, { user2Id: userId }],
+        isActive: true,
+      },
+    });
+    if (!match) throw new AppError('Match not found', 404);
+
+    // Verify the message belongs to this user
+    const message = await prisma.message.findFirst({
+      where: { id: messageId, matchId, senderId: userId },
+    });
+    if (!message) throw new AppError('Message not found or not yours', 404);
+
+    // Delete MessageStatus if exists (FK constraint), then the message
+    try {
+      await prisma.messageStatus.deleteMany({ where: { messageId } });
+    } catch (_) {
+      // MessageStatus may not exist, that's fine
+    }
+    await prisma.message.delete({ where: { id: messageId } });
+
+    // Broadcast deletion to everyone in the match room
+    emitMessageDeleted(matchId, messageId);
+
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Delete message error:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  }
+});
 
 router.put('/:matchId/read', async (req: AuthRequest, res: Response) => {
   try {

@@ -56,21 +56,47 @@ const GIF_PACKS = [
 ];
 
 // AI icebreakers generated from shared interests
-const generateIcebreakers = (sharedInterests: string[], otherName: string): string[] => {
-  const base = [
+const generateIcebreakers = (sharedInterests: string[], otherName: string, otherOccupation?: string, otherRelGoal?: string): string[] => {
+  const suggestions: string[] = [];
+
+  // Shared interest openers — most personal, show first
+  if (sharedInterests[1]) {
+    suggestions.push(`${sharedInterests[0]} AND ${sharedInterests[1]}? We have so much in common — where do we even start? 😄`);
+  }
+  if (sharedInterests[0]) {
+    suggestions.push(`I saw we both love ${sharedInterests[0]}! What got you into it? 🎯`);
+  }
+
+  // Occupation-based if available
+  if (otherOccupation) {
+    suggestions.push(`So you're in ${otherOccupation} — what's the most interesting part of your work? 💼`);
+  }
+
+  // Relationship goal based
+  if (otherRelGoal) {
+    suggestions.push(`I love that you're looking for ${otherRelGoal.toLowerCase()} — what does that look like for you? 💬`);
+  }
+
+  // Name-personalised fallbacks
+  const fallbacks = [
     `Hey ${otherName}! What's the best thing that happened to you this week? 😊`,
     `If you could travel anywhere tomorrow, where would you go? ✈️`,
     `What's your go-to comfort food after a long day? 🍕`,
     `Morning person or night owl? ☀️🦉`,
+    `What's something you're really proud of lately? 🌟`,
+    `What does your perfect weekend look like, ${otherName}? 🎉`,
+    `If you could only eat one cuisine for the rest of your life, what would it be? 🍜`,
+    `What show are you currently binge-watching? 📺`,
   ];
-  const interest = sharedInterests[0];
-  if (interest) {
-    base.unshift(`I saw we both love ${interest}! What got you into it? 🎯`);
-    if (sharedInterests[1]) {
-      base.unshift(`${interest} AND ${sharedInterests[1]}? We have so much to talk about! Where do we even start? 😄`);
-    }
+
+  // Fill up to 4 with fallbacks, shuffled so different users get different ones
+  const shuffled = fallbacks.sort(() => Math.random() - 0.5);
+  for (const f of shuffled) {
+    if (suggestions.length >= 4) break;
+    suggestions.push(f);
   }
-  return base.slice(0, 4);
+
+  return suggestions.slice(0, 4);
 };
 
 // ─── Shared interests banner ──────────────────────────────────────────────────
@@ -227,6 +253,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
   const soundRef = useRef<Audio.Sound | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playingAnim = useRef(new Animated.Value(0)).current;
+  const playingAnimRef = useRef<Animated.CompositeAnimation | null>(null);
   const { isSmall, isTablet } = useResponsive();
 
   // Load my profile + match profile for shared interests and photo
@@ -255,7 +283,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
               otherInterests.map((x: string) => x.toLowerCase()).includes(i.toLowerCase())
             );
             setSharedInterests(shared);
-            setIcebreakers(generateIcebreakers(shared, name));
+            setIcebreakers(generateIcebreakers(shared, name, match.user.occupation, match.user.relationshipGoal));
           } else {
             setIcebreakers(generateIcebreakers([], name));
           }
@@ -275,14 +303,20 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
     const unsubMsg = socketService.onNewMessage(({ matchId: mid, message }) => {
       if (mid !== matchId) return;
       setMessages(prev => {
+        // Ignore if already in list (optimistic or duplicate from own send)
         if (prev.some(m => m.id === message.id)) return prev;
+        // Ignore messages sent by me — already added optimistically
+        if (message.senderId === myUserId) return prev;
+        const isAudio = message.type === 'VOICE_NOTE';
         return [...prev, {
           id: message.id,
-          text: message.content,
+          text: isAudio ? undefined : message.content,
+          audio: isAudio ? message.content : undefined,
+          audioDuration: message.duration || 0,
           senderId: message.senderId,
           timestamp: new Date(message.createdAt),
           status: 'delivered',
-          type: (message.type?.toLowerCase() || 'text') as Message['type'],
+          type: isAudio ? 'audio' : (message.type?.toLowerCase() || 'text') as Message['type'],
         }];
       });
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -292,6 +326,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
     const unsubRead = socketService.onMessageRead(({ matchId: mid }) => {
       if (mid !== matchId) return;
       setMessages(prev => prev.map(m => ({ ...m, status: 'read' as const })));
+    });
+
+    const unsubDeleted = socketService.onMessageDeleted(({ matchId: mid, messageId }) => {
+      if (mid !== matchId) return;
+      setMessages(prev => prev.filter(m => m.id !== messageId));
     });
 
     const unsubTyping = socketService.onTyping(({ matchId: mid, isTyping: t }) => {
@@ -308,7 +347,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
     });
 
     return () => {
-      unsubMsg(); unsubRead(); unsubTyping(); unsubOnline(); unsubOffline();
+      unsubMsg(); unsubRead(); unsubDeleted(); unsubTyping(); unsubOnline(); unsubOffline();
       socketService.leaveMatch(matchId);
     };
   }, [matchId, otherUserId]);
@@ -318,12 +357,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
       const data = await api.getMessages(matchId);
       setMessages(data.map((m: any) => ({
         id: m.id,
-        text: m.content,
+        text: m.type === 'VOICE_NOTE' ? undefined : m.content,
         senderId: m.senderId,
         timestamp: new Date(m.createdAt),
         status: m.readAt ? 'read' : 'delivered',
-        type: (m.type?.toLowerCase() || 'text') as Message['type'],
-        audio: m.audioUrl,
+        type: m.type === 'VOICE_NOTE' ? 'audio' : (m.type?.toLowerCase() || 'text') as Message['type'],
+        audio: m.type === 'VOICE_NOTE' ? m.content : m.audioUrl,
         audioDuration: m.duration,
       })));
       await api.markMessagesAsRead(matchId);
@@ -344,8 +383,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     try {
       const saved = await api.sendMessage(matchId, text, 'TEXT');
+      // Replace optimistic message with saved one — do NOT call socketService.sendMessage
+      // as the server broadcasts it back via socket which would cause a duplicate
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: saved.id, status: 'delivered' } : m));
-      socketService.sendMessage(matchId, text, 'TEXT');
     } catch {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       Alert.alert('Error', 'Failed to send message.');
@@ -365,6 +405,34 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
     setMessages(prev => [...prev, msg]);
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     api.sendMessage(matchId, emoji, 'TEXT').catch(() => {});
+  };
+
+  const [messageMenu, setMessageMenu] = useState<{ visible: boolean; item: Message | null }>({ visible: false, item: null });
+
+  const handleLongPress = (item: Message, isMe: boolean) => {
+    if (isMe) {
+      setMessageMenu({ visible: true, item });
+    } else {
+      setReactionTarget(item.id);
+    }
+  };
+
+  const handleDeleteMessage = async () => {
+    const item = messageMenu.item;
+    if (!item) return;
+    setMessageMenu({ visible: false, item: null });
+    setMessages(prev => prev.filter(m => m.id !== item.id));
+    try {
+      await api.deleteMessage(matchId, item.id);
+    } catch (error: any) {
+      // Restore message on failure
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === item.id);
+        return exists ? prev : [...prev, item].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      });
+      const reason = error?.response?.data?.error || error?.message || 'Unknown error';
+      Alert.alert('Could not delete', reason);
+    }
   };
 
   const addReaction = (messageId: string, emoji: string) => {
@@ -418,9 +486,25 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
         if (uri) {
           const st = await recordingRef.current.getStatusAsync();
           const dur = st.durationMillis ? Math.round(st.durationMillis / 1000) : recordingDuration;
-          const msg: Message = { id: `temp_${Date.now()}`, audio: uri, audioDuration: dur, senderId: myUserId || 'me', timestamp: new Date(), status: 'sent', type: 'audio' };
-          setMessages(prev => [...prev, msg]);
+
+          // Add optimistic message with local URI while uploading
+          const tempId = `temp_${Date.now()}`;
+          const optimistic: Message = { id: tempId, audio: uri, audioDuration: dur, senderId: myUserId || 'me', timestamp: new Date(), status: 'sent', type: 'audio' };
+          setMessages(prev => [...prev, optimistic]);
           setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+          // Upload to server in background
+          try {
+            const saved = await api.uploadChatAudio(matchId, uri, dur);
+            // Replace temp with saved (now has a persistent Cloudinary URL)
+            setMessages(prev => prev.map(m =>
+              m.id === tempId ? { ...m, id: saved.id, audio: saved.audioUrl, status: 'delivered' } : m
+            ));
+          } catch (uploadErr) {
+            console.error('Audio upload failed:', uploadErr);
+            // Keep local URI so user can still play it this session
+            setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sent' } : m));
+          }
         }
         recordingRef.current = null;
       }
@@ -432,10 +516,24 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
     try {
       if (soundRef.current) { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); soundRef.current = null; }
       setMessages(prev => prev.map(m => ({ ...m, isPlaying: m.id === messageId })));
+      // Start wave animation
+      playingAnimRef.current?.stop();
+      playingAnim.setValue(0);
+      playingAnimRef.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(playingAnim, { toValue: 1, duration: 400, useNativeDriver: false }),
+          Animated.timing(playingAnim, { toValue: 0, duration: 400, useNativeDriver: false }),
+        ])
+      );
+      playingAnimRef.current.start();
       const { sound } = await Audio.Sound.createAsync({ uri });
       soundRef.current = sound;
       sound.setOnPlaybackStatusUpdate(s => {
-        if (s.isLoaded && !s.isPlaying) setMessages(prev => prev.map(m => ({ ...m, isPlaying: false })));
+        if (s.isLoaded && !s.isPlaying) {
+          setMessages(prev => prev.map(m => ({ ...m, isPlaying: false })));
+          playingAnimRef.current?.stop();
+          playingAnim.setValue(0);
+        }
       });
       await sound.playAsync();
     } catch { setMessages(prev => prev.map(m => ({ ...m, isPlaying: false }))); }
@@ -467,7 +565,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
 
         <TouchableOpacity
           activeOpacity={0.85}
-          onLongPress={() => setReactionTarget(item.id)}
+          onLongPress={() => handleLongPress(item, isMe)}
           style={[s.bubble, isMe ? s.myBubble : s.theirBubble]}
         >
           {/* GIF */}
@@ -480,21 +578,46 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
           )}
           {/* Audio */}
           {item.type === 'audio' && (
-            <TouchableOpacity style={s.audioRow} onPress={() => item.audio && playAudio(item.id, item.audio)}>
-              <View style={[s.playBtn, isMe && s.playBtnMe]}>
-                <Ionicons name={item.isPlaying ? 'pause' : 'play'} size={18} color={isMe ? COLORS.primary : COLORS.white} />
+            <TouchableOpacity style={s.audioRow} onPress={() => item.audio && playAudio(item.id, item.audio)} activeOpacity={0.8}>
+              {/* Play/Pause button */}
+              <View style={[s.playBtn, isMe ? s.playBtnMe : s.playBtnThem]}>
+                <Ionicons
+                  name={item.isPlaying ? 'pause' : 'play'}
+                  size={16}
+                  color={isMe ? COLORS.white : COLORS.primary}
+                />
               </View>
-              <View>
-                <Text style={[s.audioLabel, isMe && s.myText]}>Voice message</Text>
-                {item.audioDuration !== undefined && (
-                  <Text style={[s.audioDur, isMe && s.myText]}>{item.audioDuration}s</Text>
-                )}
+
+              {/* Waveform bars — animated when playing, static when not */}
+              <View style={s.waveform}>
+                {[5, 9, 14, 10, 7, 12, 8, 11, 6, 13, 9, 7].map((h, i) => {
+                  const animHeight = item.isPlaying
+                    ? playingAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [3, 3 + (i % 2 === 0 ? h : h * 0.6)],
+                      })
+                    : 3 + (i % 4) * 2;
+                  return (
+                    <Animated.View
+                      key={i}
+                      style={[
+                        s.wave,
+                        {
+                          height: animHeight,
+                          backgroundColor: isMe
+                            ? item.isPlaying ? COLORS.white : 'rgba(255,255,255,0.45)'
+                            : item.isPlaying ? COLORS.primary : COLORS.border,
+                        },
+                      ]}
+                    />
+                  );
+                })}
               </View>
-              {item.isPlaying && (
-                <View style={s.waveform}>
-                  {[1,2,3,4,5].map(i => <View key={i} style={[s.wave, { height: 4 + i * 3 }]} />)}
-                </View>
-              )}
+
+              {/* Duration */}
+              <Text style={[s.audioDur, isMe && s.myText]}>
+                {item.audioDuration !== undefined ? `${item.audioDuration}s` : '…'}
+              </Text>
             </TouchableOpacity>
           )}
           {/* Text */}
@@ -578,10 +701,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
           onPress={() => navigation.navigate('VideoCall', { matchId, userName: name, userPhoto: '', isIncoming: false })}>
           <Ionicons name="videocam" size={20} color={COLORS.primary} />
         </TouchableOpacity>
-        <TouchableOpacity style={s.iconBtn} hitSlop={HIT_SLOP}
-          onPress={() => setShowReadReceipts(v => !v)}>
-          <Ionicons name={showReadReceipts ? 'eye' : 'eye-off'} size={18} color={COLORS.textSecondary} />
-        </TouchableOpacity>
         <EmergencyButton matchId={matchId} />
       </View>
 
@@ -590,8 +709,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
         <SharedInterestsBanner interests={sharedInterests} onDismiss={() => setShowBanner(false)} />
       )}
 
-      {/* Icebreaker bar */}
-      {showIcebreakers && (
+      {/* Icebreaker bar — only show when no messages yet */}
+      {showIcebreakers && messages.length === 0 && (
         <IcebreakerBar
           suggestions={icebreakers}
           onPick={s => { setInputText(s); setShowIcebreakers(false); }}
@@ -635,10 +754,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
               <Ionicons name="happy-outline" size={26} color={COLORS.primary} />
             </TouchableOpacity>
 
-            {/* Icebreaker bulb */}
+            {/* Icebreaker bulb — only show when no messages yet */}
+            {messages.length === 0 && (
             <TouchableOpacity style={s.iconBtn} hitSlop={HIT_SLOP} onPress={() => setShowIcebreakers(v => !v)}>
               <Ionicons name="bulb-outline" size={22} color={COLORS.warning} />
             </TouchableOpacity>
+            )}
 
             <View style={s.textBox}>
               <TextInput
@@ -656,14 +777,34 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
               <TouchableOpacity style={s.sendBtn} onPress={() => sendText(inputText)} hitSlop={HIT_SLOP}>
                 <Ionicons name="send" size={18} color={COLORS.white} />
               </TouchableOpacity>
+            ) : isRecording ? (
+              /* ── Recording UI ── */
+              <View style={s.recordingBar}>
+                <View style={s.recordingWaves}>
+                  {[3, 6, 10, 7, 4, 9, 5, 8, 3, 6].map((h, i) => (
+                    <Animated.View
+                      key={i}
+                      style={[
+                        s.recordingWaveBar,
+                        {
+                          height: 4 + ((recordingDuration * 3 + i * 7) % h) + h,
+                        },
+                      ]}
+                    />
+                  ))}
+                </View>
+                <Text style={s.recDur}>{recordingDuration}s</Text>
+                <TouchableOpacity style={s.recStopBtn} onPress={stopAudioRecording} hitSlop={HIT_SLOP}>
+                  <Ionicons name="stop" size={16} color={COLORS.white} />
+                </TouchableOpacity>
+              </View>
             ) : (
               <TouchableOpacity
-                style={[s.micBtn, isRecording && s.micBtnActive]}
-                onPress={isRecording ? stopAudioRecording : startAudioRecording}
+                style={s.micBtn}
+                onPress={startAudioRecording}
                 hitSlop={HIT_SLOP}
               >
-                <Ionicons name={isRecording ? 'square' : 'mic'} size={20} color={isRecording ? COLORS.white : COLORS.primary} />
-                {isRecording && <Text style={s.recDur}>{recordingDuration}s</Text>}
+                <Ionicons name="mic" size={20} color={COLORS.primary} />
               </TouchableOpacity>
             )}
           </View>
@@ -677,6 +818,40 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
         onGif={sendGif}
         onSticker={sendSticker}
       />
+
+      {/* ── Message options bottom sheet ── */}
+      <Modal
+        visible={messageMenu.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMessageMenu({ visible: false, item: null })}
+      >
+        <TouchableOpacity
+          style={s.menuBackdrop}
+          activeOpacity={1}
+          onPress={() => setMessageMenu({ visible: false, item: null })}
+        >
+          <View style={s.menuSheet}>
+            <View style={s.menuHandle} />
+            <TouchableOpacity style={s.menuOption} onPress={handleDeleteMessage}>
+              <View style={s.menuOptionIcon}>
+                <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+              </View>
+              <Text style={s.menuOptionTextDanger}>Delete for Everyone</Text>
+            </TouchableOpacity>
+            <View style={s.menuDivider} />
+            <TouchableOpacity
+              style={s.menuOption}
+              onPress={() => setMessageMenu({ visible: false, item: null })}
+            >
+              <View style={s.menuOptionIcon}>
+                <Ionicons name="close-outline" size={20} color={COLORS.textSecondary} />
+              </View>
+              <Text style={s.menuOptionText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -712,13 +887,14 @@ const s = StyleSheet.create({
   gifImg: { width: 180, height: 120, borderRadius: BORDER_RADIUS.md },
   stickerText: { fontSize: 48 },
 
-  audioRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
-  playBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
+  audioRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, minWidth: 160 },
+  playBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   playBtnMe: { backgroundColor: 'rgba(255,255,255,0.25)' },
+  playBtnThem: { backgroundColor: COLORS.primarySoft },
   audioLabel: { fontSize: FONTS.sizes.sm, color: COLORS.text },
-  audioDur: { fontSize: FONTS.sizes.xs, color: COLORS.textSecondary },
-  waveform: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  wave: { width: 3, backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 2 },
+  audioDur: { fontSize: FONTS.sizes.xs, color: COLORS.textSecondary, minWidth: 24 },
+  waveform: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2, height: 24 },
+  wave: { width: 3, borderRadius: 2, minHeight: 3 },
 
   reactionsRow: { flexDirection: 'row', gap: 4, marginTop: 4, alignSelf: 'flex-start', paddingLeft: SPACING.sm },
   reactionsRowMe: { alignSelf: 'flex-end', paddingLeft: 0, paddingRight: SPACING.sm },
@@ -746,5 +922,90 @@ const s = StyleSheet.create({
   sendBtn: { width: MIN_TOUCH_SIZE, height: MIN_TOUCH_SIZE, borderRadius: MIN_TOUCH_SIZE / 2, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },
   micBtn: { width: MIN_TOUCH_SIZE, height: MIN_TOUCH_SIZE, borderRadius: MIN_TOUCH_SIZE / 2, backgroundColor: COLORS.backgroundGray, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4 },
   micBtnActive: { backgroundColor: COLORS.error },
-  recDur: { fontSize: FONTS.sizes.xs, color: COLORS.white, fontWeight: '600' },
+  recDur: { fontSize: FONTS.sizes.xs, color: COLORS.error, fontWeight: '700', marginHorizontal: 6 },
+  micBtnActive: { backgroundColor: COLORS.error },
+  recordingBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.errorLight,
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginLeft: 6,
+  },
+  recordingWaves: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    height: 28,
+  },
+  recordingWaveBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: COLORS.error,
+    opacity: 0.8,
+  },
+  recStopBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+  },
+
+  // ── Message options bottom sheet ──
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  menuSheet: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 32,
+  },
+  menuHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  menuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    gap: 14,
+  },
+  menuOptionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.backgroundGray,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuOptionText: {
+    fontSize: FONTS.sizes.md,
+    color: COLORS.text,
+    fontWeight: '500',
+  },
+  menuOptionTextDanger: {
+    fontSize: FONTS.sizes.md,
+    color: COLORS.error,
+    fontWeight: '600',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginHorizontal: -16,
+  },
 });

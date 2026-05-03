@@ -1,45 +1,89 @@
+import { Resend } from 'resend';
 import { prisma } from '../lib/prisma';
 
-// Email verification code expiry time in minutes
 const CODE_EXPIRY_MINUTES = 15;
 
-// Generate a random 6-digit code
 const generateCode = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Send verification email — currently logs code to console (no email provider configured)
-export const sendVerificationEmail = async (userId: string): Promise<{ success: boolean; message: string; code?: string }> => {
+// Initialise Resend only if API key is set
+const getResend = (): Resend | null => {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return null;
+  return new Resend(key);
+};
+
+const FROM_EMAIL = process.env.EMAIL_FROM || 'TrustMatch <noreply@trustmatch.app>';
+
+// ── Send verification email ───────────────────────────────────────────────────
+export const sendVerificationEmail = async (
+  userId: string
+): Promise<{ success: boolean; message: string; code?: string }> => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { verification: true }
+      include: { verification: true },
     });
 
-    if (!user) {
-      return { success: false, message: 'User not found' };
-    }
-
-    if (user.verification?.emailVerified) {
-      return { success: false, message: 'Email already verified' };
-    }
+    if (!user) return { success: false, message: 'User not found' };
+    if (user.verification?.emailVerified) return { success: false, message: 'Email already verified' };
 
     const code = generateCode();
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + CODE_EXPIRY_MINUTES);
 
-    // Save code to DB
     await prisma.verification.update({
       where: { userId },
-      data: {
-        emailCode: code,
-        emailCodeExpiry: expiresAt
-      }
+      data: { emailCode: code, emailCodeExpiry: expiresAt },
     });
 
-    // Log code to console for development use
+    const resend = getResend();
+
+    if (resend) {
+      // Send real email via Resend
+      const { error } = await resend.emails.send({
+        from: FROM_EMAIL,
+        to: user.email,
+        subject: 'Your TrustMatch verification code',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #fff;">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <h1 style="color: #DC2626; font-size: 28px; margin: 0;">TrustMatch</h1>
+              <p style="color: #6B7280; margin-top: 4px;">Verify your email address</p>
+            </div>
+            <p style="color: #1F2937; font-size: 16px;">Hi ${user.firstName},</p>
+            <p style="color: #1F2937; font-size: 16px;">
+              Use the code below to verify your email address. This code expires in ${CODE_EXPIRY_MINUTES} minutes.
+            </p>
+            <div style="background: #FEE2E2; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+              <span style="font-size: 40px; font-weight: bold; letter-spacing: 8px; color: #DC2626;">
+                ${code}
+              </span>
+            </div>
+            <p style="color: #6B7280; font-size: 14px;">
+              If you didn't request this, you can safely ignore this email.
+            </p>
+            <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
+            <p style="color: #9CA3AF; font-size: 12px; text-align: center;">
+              © ${new Date().getFullYear()} TrustMatch. All rights reserved.
+            </p>
+          </div>
+        `,
+      });
+
+      if (error) {
+        console.error('[Resend] Failed to send email:', error);
+        // Fall through to console log as fallback
+      } else {
+        console.log(`[Email] Verification code sent to ${user.email}`);
+        return { success: true, message: 'Verification code sent to your email' };
+      }
+    }
+
+    // Fallback: log to console (development / no API key)
     console.log(`\n========================================`);
-    console.log(`[EMAIL VERIFICATION CODE]`);
+    console.log(`[EMAIL VERIFICATION CODE - NO PROVIDER]`);
     console.log(`  User  : ${user.email}`);
     console.log(`  Code  : ${code}`);
     console.log(`  Expiry: ${CODE_EXPIRY_MINUTES} minutes`);
@@ -48,36 +92,31 @@ export const sendVerificationEmail = async (userId: string): Promise<{ success: 
     return { success: true, message: 'Verification code generated', code };
   } catch (error) {
     console.error('Send verification email error:', error);
-    return { success: false, message: 'Failed to generate verification code' };
+    return { success: false, message: 'Failed to send verification email' };
   }
 };
 
-// Verify the submitted code
-export const verifyEmailCode = async (userId: string, code: string): Promise<{ success: boolean; message: string }> => {
+// ── Verify submitted code ─────────────────────────────────────────────────────
+export const verifyEmailCode = async (
+  userId: string,
+  code: string
+): Promise<{ success: boolean; message: string }> => {
   try {
-    const verification = await prisma.verification.findUnique({
-      where: { userId }
-    });
+    const verification = await prisma.verification.findUnique({ where: { userId } });
 
-    if (!verification) {
-      return { success: false, message: 'Verification not found' };
-    }
+    if (!verification) return { success: false, message: 'Verification not found' };
 
     const storedCode = String(verification.emailCode);
     const enteredCode = String(code).trim();
 
-    console.log('[verifyEmailCode] Stored:', storedCode, '| Entered:', enteredCode);
-
-    if (storedCode !== enteredCode) {
-      return { success: false, message: 'Invalid verification code' };
-    }
+    if (storedCode !== enteredCode) return { success: false, message: 'Invalid verification code' };
 
     if (!verification.emailCodeExpiry || verification.emailCodeExpiry < new Date()) {
       await prisma.verification.update({
         where: { userId },
-        data: { emailCode: null, emailCodeExpiry: null }
+        data: { emailCode: null, emailCodeExpiry: null },
       });
-      return { success: false, message: 'Verification code has expired' };
+      return { success: false, message: 'Verification code has expired. Please request a new one.' };
     }
 
     await prisma.verification.update({
@@ -87,8 +126,8 @@ export const verifyEmailCode = async (userId: string, code: string): Promise<{ s
         isVerified: true,
         verifiedAt: new Date(),
         emailCode: null,
-        emailCodeExpiry: null
-      }
+        emailCodeExpiry: null,
+      },
     });
 
     return { success: true, message: 'Email verified successfully!' };
@@ -98,12 +137,14 @@ export const verifyEmailCode = async (userId: string, code: string): Promise<{ s
   }
 };
 
-// Resend verification code (generates a new one)
-export const resendVerificationCode = async (userId: string): Promise<{ success: boolean; message: string; code?: string }> => {
+// ── Resend code ───────────────────────────────────────────────────────────────
+export const resendVerificationCode = async (
+  userId: string
+): Promise<{ success: boolean; message: string; code?: string }> => {
   return sendVerificationEmail(userId);
 };
 
-// Interface for verification result data
+// ── Verification result email ─────────────────────────────────────────────────
 interface VerificationResultData {
   success: boolean;
   trustScore: number;
@@ -113,31 +154,46 @@ interface VerificationResultData {
   isDeepfake: boolean;
 }
 
-// Log verification result (no email provider configured yet)
-export const sendVerificationResultEmail = async (userId: string, result: VerificationResultData): Promise<{ success: boolean; message: string }> => {
+export const sendVerificationResultEmail = async (
+  userId: string,
+  result: VerificationResultData
+): Promise<{ success: boolean; message: string }> => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { email: true, firstName: true }
+      select: { email: true, firstName: true },
     });
 
-    if (!user) {
-      return { success: false, message: 'User not found' };
+    if (!user) return { success: false, message: 'User not found' };
+
+    const resend = getResend();
+
+    if (resend && result.success) {
+      await resend.emails.send({
+        from: FROM_EMAIL,
+        to: user.email,
+        subject: 'Your TrustMatch verification is complete ✓',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #fff;">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <h1 style="color: #DC2626; font-size: 28px; margin: 0;">TrustMatch</h1>
+            </div>
+            <p style="color: #1F2937; font-size: 16px;">Hi ${user.firstName},</p>
+            <p style="color: #1F2937; font-size: 16px;">
+              🎉 Your identity has been verified! You can now start discovering matches on TrustMatch.
+            </p>
+            <div style="background: #D1FAE5; border-radius: 12px; padding: 20px; margin: 24px 0;">
+              <p style="color: #065F46; font-weight: bold; margin: 0;">Trust Score: ${result.trustScore}/100</p>
+            </div>
+            <p style="color: #6B7280; font-size: 14px;">Welcome to TrustMatch — where every connection is real.</p>
+          </div>
+        `,
+      });
     }
 
-    console.log(`\n========================================`);
-    console.log(`[VERIFICATION RESULT] ${user.email}`);
-    console.log(`  Status    : ${result.success ? 'PASSED' : 'FAILED'}`);
-    console.log(`  Trust Score: ${result.trustScore}/100`);
-    console.log(`  Confidence : ${Math.round(result.confidence * 100)}%`);
-    if (result.ageEstimate) console.log(`  Age Estimate: ${result.ageEstimate}`);
-    console.log(`  Bot       : ${result.isLikelyBot ? 'Suspicious' : 'Authentic'}`);
-    console.log(`  Deepfake  : ${result.isDeepfake ? 'Detected' : 'Not Detected'}`);
-    console.log(`========================================\n`);
-
-    return { success: true, message: 'Verification result logged' };
+    return { success: true, message: 'Verification result email sent' };
   } catch (error) {
     console.error('Send verification result error:', error);
-    return { success: false, message: 'Failed to log verification result' };
+    return { success: false, message: 'Failed to send verification result email' };
   }
 };
