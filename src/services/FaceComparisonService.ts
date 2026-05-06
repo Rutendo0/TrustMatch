@@ -92,7 +92,7 @@ export const comprehensiveFaceComparison = async (
   idImageUri: string | undefined,
   selfieImageUri: string,
   profilePhotoUris: string[] | undefined,
-  threshold: number = 0.45
+  threshold: number = 0.35
 ): Promise<ComprehensiveFaceComparisonResult> => {
   try {
     console.log('=== Starting Server-Side Face Comparison ===');
@@ -182,7 +182,7 @@ export const comprehensiveFaceComparison = async (
 export const compareIdAndSelfie = async (
   idImageUri: string,
   selfieImageUri: string,
-  threshold: number = 0.45
+  threshold: number = 0.35
 ): Promise<FaceComparisonResult> => {
   const result = await serverFaceCompare(idImageUri, selfieImageUri);
   

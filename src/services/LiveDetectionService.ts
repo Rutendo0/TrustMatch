@@ -55,8 +55,8 @@ export class LiveDetectionService {
    ): Promise<LiveDetectionResult> {
      try {
        const {
-         threshold = 0.45,
-         requireMinimumMatches = 2,
+         threshold = 0.35,
+         requireMinimumMatches = 1,
          includeVerificationPhotos = true,
          storedPhotos: providedStoredPhotos,
        } = options;
