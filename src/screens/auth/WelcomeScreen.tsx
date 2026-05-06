@@ -7,6 +7,7 @@ import {
   StatusBar,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -124,8 +125,25 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
 
           <Text style={styles.terms}>
             By continuing, you agree to our{' '}
-            <Text style={styles.link}>Terms</Text> and{' '}
-            <Text style={styles.link}>Privacy</Text>
+            <Text
+              style={styles.link}
+              onPress={() => Alert.alert(
+                'Terms of Service',
+                'TrustMatch requires all users to be 18+, use real identity documents for verification, and treat other users with respect. Fake profiles, harassment, or misuse will result in permanent bans.\n\nFull terms available at trustmatch.app/terms'
+              )}
+            >
+              Terms
+            </Text>
+            {' '}and{' '}
+            <Text
+              style={styles.link}
+              onPress={() => Alert.alert(
+                'Privacy Policy',
+                'TrustMatch collects your name, email, phone, photos and ID documents solely for identity verification. Your data is encrypted and never sold to third parties. You can request deletion of your account and data at any time.\n\nFull policy available at trustmatch.app/privacy'
+              )}
+            >
+              Privacy Policy
+            </Text>
           </Text>
         </LinearGradient>
       </SafeAreaView>

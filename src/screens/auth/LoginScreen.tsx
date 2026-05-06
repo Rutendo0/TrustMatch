@@ -158,7 +158,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
               error={errors.password}
             />
 
-            <TouchableOpacity style={styles.forgotPassword}>
+            <TouchableOpacity
+              style={styles.forgotPassword}
+              onPress={() =>
+                Alert.alert(
+                  'Reset Password',
+                  'Please contact support at support@trustmatch.app to reset your password.',
+                  [{ text: 'OK' }]
+                )
+              }
+            >
               <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
             </TouchableOpacity>
 
