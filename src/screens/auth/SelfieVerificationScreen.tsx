@@ -138,12 +138,16 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         );
         return;
       }
+
+      // Only compare against the MAIN (first) profile photo — that's the one
+      // the user chose as their primary photo. One clear match is required.
+      const mainPhoto = profilePhotosList[0];
       
        const liveDetectionResult = await liveDetectionService.performLiveDetection(photoUri, {
-         threshold: 0.45,
+         threshold: 0.35,
          requireMinimumMatches: 1,
          includeVerificationPhotos: false,
-         storedPhotos: profilePhotosList,
+         storedPhotos: [mainPhoto],
        });
       
       console.log('Live detection result:', liveDetectionResult);
@@ -306,49 +310,42 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
   };
 
   const renderInstructions = () => (
-    <ScrollView 
-      style={styles.content}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.content}>
       <View style={styles.titleSection}>
         <View style={styles.iconContainer}>
-          <Ionicons name="person-circle" size={50} color={COLORS.primary} />
+          <Ionicons name="shield-checkmark" size={44} color={COLORS.primary} />
         </View>
-        <Text style={styles.title}>Take a Selfie</Text>
+        <Text style={styles.title}>Identity Verification</Text>
         <Text style={styles.subtitle}>
-          We'll compare your selfie with your profile photos to verify it's really you and prevent catfishing.
+          Take a quick selfie to confirm you match your profile photo.
         </Text>
       </View>
 
       <View style={styles.instructionsList}>
-        {instructions.map((item, index) => (
-          <View key={index} style={styles.instructionItem}>
-            <Text style={styles.instructionIcon}>{item.icon}</Text>
-            <Text style={styles.instructionText}>{item.text}</Text>
-          </View>
-        ))}
-      </View>
-
-      <Card variant="outlined" style={styles.securityCard}>
-        <View style={styles.securityRow}>
-          <Ionicons name="lock-closed" size={20} color={COLORS.success} />
-          <Text style={styles.securityText}>
-            Your photos are encrypted and securely stored. We never share your verification data.
-          </Text>
+        <View style={styles.instructionItem}>
+          <Ionicons name="sunny-outline" size={20} color={COLORS.primary} />
+          <Text style={styles.instructionText}>Good lighting, face clearly visible</Text>
         </View>
-      </Card>
+        <View style={styles.instructionItem}>
+          <Ionicons name="eye-outline" size={20} color={COLORS.primary} />
+          <Text style={styles.instructionText}>Look directly at the camera</Text>
+        </View>
+        <View style={styles.instructionItem}>
+          <Ionicons name="glasses-outline" size={20} color={COLORS.primary} />
+          <Text style={styles.instructionText}>Remove sunglasses or face coverings</Text>
+        </View>
+      </View>
 
       <View style={styles.footer}>
         <Button
           title="Start Verification"
           onPress={handleStartCamera}
           size="large"
-          icon={<Ionicons name="shield-checkmark" size={20} color={COLORS.white} />}
+          icon={<Ionicons name="camera" size={20} color={COLORS.white} />}
           style={styles.cameraButton}
         />
       </View>
-    </ScrollView>
+    </View>
   );
 
   const renderCamera = () => (
@@ -669,16 +666,19 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   instructionsList: {
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
+    gap: SPACING.xs,
+    marginBottom: SPACING.xl,
   },
   instructionItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.md,
-    backgroundColor: COLORS.background,
-    padding: SPACING.md,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.primary,
+    backgroundColor: COLORS.primarySoft,
   },
   instructionIcon: {
     fontSize: 24,
@@ -689,6 +689,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONTS.sizes.md,
     color: COLORS.text,
+    fontWeight: '500',
   },
   securityCard: {
     backgroundColor: 'rgba(16, 185, 129, 0.1)',

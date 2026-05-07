@@ -80,24 +80,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   // ── Header ───────────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerShown: true,
-      headerTitle: 'Discover',
-      headerTitleAlign: 'center',
-      headerStyle: { backgroundColor: COLORS.background },
-      headerTintColor: COLORS.text,
-      headerRight: () => (
-        <View style={{ marginRight: 16 }}>
-          <TouchableOpacity onPress={() => navigation.navigate('Filters')} hitSlop={HIT_SLOP}>
-            <Ionicons name="options-outline" size={normalize(24)} color={COLORS.text} />
-          </TouchableOpacity>
-        </View>
-      ),
+      headerShown: false,
     });
-  }, [navigation, normalize]);
+  }, [navigation]);
 
   // ── Card dimensions ──────────────────────────────────────────────────────
   const cardDimensions = useMemo(() => {
-    const cardHeight = isLandscape ? hp(75) : hp(60);
+    const cardHeight = isLandscape ? hp(70) : hp(55);
     const cardWidth = isLandscape
       ? Math.min(wp(50), height * 0.65)
       : wp(100) - SPACING.lg * 2;
@@ -363,16 +352,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   // ── MAIN RENDER ──────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top', 'left', 'right', 'bottom']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity hitSlop={HIT_SLOP} onPress={() => navigation.navigate('Profile')}>
-          <View style={styles.profilePicContainer}>
-            <Image
-              source={{ uri: myProfile?.photo || 'https://via.placeholder.com/40' }}
-              style={dynamicStyles.profilePic}
-            />
-          </View>
+          <Image
+            source={{ uri: myProfile?.photo || 'https://via.placeholder.com/40' }}
+            style={dynamicStyles.profilePic}
+          />
         </TouchableOpacity>
         <View style={styles.logoContainer}>
           <Text style={dynamicStyles.logoText}>TrustMatch</Text>
@@ -637,6 +624,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.sm,
   },
   profileCard: {
     position: 'relative',

@@ -153,47 +153,7 @@ const MainTabs = () => {
     >
       <Tab.Screen name="Home" component={HomeScreen} options={{ 
         tabBarLabel: 'Discover',
-        headerShown: true,
-        headerTitle: 'Discover',
-        headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: colors.white },
-        headerTitleStyle: { color: colors.text, fontWeight: 'bold', fontSize: 18 },
-        headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginRight: 16 }}>
-            <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
-              <Ionicons 
-                name="settings-outline" 
-                size={24} 
-                color={colors.text} 
-              />
-            </TouchableOpacity>
-            {userPhoto ? (
-              <TouchableOpacity onPress={() => navigation.navigate('ProfileDetail', { profile: null, isOwnProfile: true })}>
-                <Image
-                  source={{ uri: userPhoto }}
-                  style={{ width: 32, height: 32, borderRadius: 16 }}
-                />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity onPress={() => navigation.navigate('ProfileDetail', { profile: null, isOwnProfile: true })}>
-                <Ionicons 
-                  name="person-circle-outline" 
-                  size={28} 
-                  color={colors.primary}
-                />
-              </TouchableOpacity>
-            )}
-          </View>
-        ),
-        headerLeft: () => (
-          <View style={{ marginLeft: 16 }}>
-            {userPhoto ? (
-              <Image source={{ uri: userPhoto }} style={{ width: 36, height: 36, borderRadius: 18 }} />
-            ) : (
-              <Ionicons name="person-circle" size={36} color={colors.primary} />
-            )}
-          </View>
-        ),
+        headerShown: false,
       }} />
       <Tab.Screen name="Likes" component={LikesScreen} options={{ 
         tabBarLabel: 'Likes',

@@ -147,7 +147,8 @@ export const comprehensiveFaceComparison = async (
     // Calculate overall results
     const avgSimilarity = results.length > 0 ? totalSimilarity / results.length : 0;
     const allMatch = matchCount === results.length && results.length > 0;
-    const passThreshold = matchCount > 0 && avgSimilarity >= threshold;
+    // Pass if DeepFace verified at least one match OR avg similarity above threshold
+    const passThreshold = matchCount > 0 || avgSimilarity >= threshold;
 
     console.log(`\n=== Face Comparison Summary ===`);
     console.log(`Total comparisons: ${results.length}`);
@@ -158,8 +159,10 @@ export const comprehensiveFaceComparison = async (
 
     return {
       success: true,
-      selfieWithId: results[0] || { isMatch: false, similarity: 0, threshold, faceDetected: !!idImageUri },
-      selfieWithProfiles: results.slice(1),
+      selfieWithId: idImageUri
+        ? (results[0] || { isMatch: false, similarity: 0, threshold, faceDetected: false })
+        : { isMatch: false, similarity: 0, threshold, faceDetected: false },
+      selfieWithProfiles: idImageUri ? results.slice(1) : results,
       allMatch,
       overallSimilarity: avgSimilarity,
     };

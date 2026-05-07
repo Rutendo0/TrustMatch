@@ -93,16 +93,23 @@ const DOCUMENT_PATTERNS = {
 function extractNamesFromOcrText(text: string): { firstName?: string; lastName?: string; dob?: string } {
   const upper = text.toUpperCase();
 
+  // Pre-process: merge OCR-split words like "MIKITA YO" → "MIKITAYO"
+  // Short fragments (2-3 chars) after a long word are likely OCR splits
+  const mergedText = upper.replace(/([A-Z]{4,})\s+([A-Z]{2,3})(?=\s+[A-Z]{3,}|\s+\d|\s*$)/g, (match, a, b) => {
+    // Only merge if the fragment looks like a suffix, not a standalone word
+    const STANDALONE = new Set(['OF', 'IN', 'AT', 'TO', 'BY', 'OR', 'CIT', 'THE', 'AND', 'FOR', 'REP']);
+    if (STANDALONE.has(b)) return match;
+    return `${a}${b}`;
+  });
+
   // Strategy 1: Find surname and first name using label positions
-  // In OCR.space output, SURNAME label comes before FIRST NAME label,
-  // and the actual values appear after all labels in order
-  const surnameMatch = upper.match(
+  const surnameMatch = mergedText.match(
     /SURNAME\s+([A-Z]{3,}(?:\s+[A-Z]{3,})*?)(?=\s+FIRST\s+NAME|\s+DATE|\s+VILLAGE|\s+PLACE|\s*$)/
   );
-  const firstNameMatch = upper.match(
+  const firstNameMatch = mergedText.match(
     /FIRST\s+NAME\s+([A-Z]{3,}(?:\s+[A-Z]{2,})*?)(?=\s+DATE|\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE|\s*$)/
   );
-  const dobMatch = upper.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
+  const dobMatch = mergedText.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
 
   // Strategy 2: For OCR.space layout where values come after all labels
   // Find the block of uppercase words that appear after the ID number
@@ -133,9 +140,8 @@ function extractNamesFromOcrText(text: string): { firstName?: string; lastName?:
   }
 
   // Strategy 3: If label-based failed, find values after the ID number pattern
-  // Zimbabwe ID: "63-2271966 L 63 CIT F" followed by SURNAME then FIRSTNAME
   if (!lastName || !firstName) {
-    const afterIdMatch = upper.match(/\d{2}-\d{7}\s+\w+\s+\d+\s+(\w+)\s+\w+\s+([A-Z]{3,})\s+([A-Z]{3,})/);
+    const afterIdMatch = mergedText.match(/\d{2}-\d{7}\s+\w+\s+\d+\s+(\w+)\s+\w+\s+([A-Z]{3,})\s+([A-Z]{3,})/);
     if (afterIdMatch) {
       // afterIdMatch[2] = surname, afterIdMatch[3] = first name
       const IGNORE = new Set(['CIT', 'THE', 'AND', 'FOR']);

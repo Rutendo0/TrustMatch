@@ -692,6 +692,18 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       </View>
 
       <Text style={styles.label}>Upload Front of National ID</Text>
+
+      {/* Crop hint — shown before image is selected */}
+      {!idFrontImage && (
+        <View style={styles.cropHintBox}>
+          <Ionicons name="crop-outline" size={18} color={COLORS.warning} />
+          <Text style={styles.cropHintText}>
+            After selecting your photo, a crop screen will appear.{' '}
+            <Text style={{ fontWeight: '700' }}>Tap "Done" or the checkmark</Text> to confirm and add your ID.
+          </Text>
+        </View>
+      )}
+
       <View style={styles.uploadButtons}>
         <TouchableOpacity style={styles.uploadButton} onPress={() => showImagePicker('front')}>
           <Ionicons name="images-outline" size={32} color={COLORS.primary} />
@@ -706,6 +718,10 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       {idFrontImage && (
         <View style={styles.previewContainer}>
           <Image source={{ uri: idFrontImage }} style={styles.preview} />
+          <View style={styles.imageAddedBadge}>
+            <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+            <Text style={styles.imageAddedText}>ID photo added</Text>
+          </View>
           <TouchableOpacity 
             style={styles.removeButton}
             onPress={() => setIdFrontImage(null)}
@@ -719,7 +735,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       <View style={styles.infoBox}>
         <Ionicons name="information-circle" size={20} color={COLORS.info} />
         <Text style={styles.infoText}>
-          Take a clear photo of the front of your National ID. Ensure your name, date of birth and ID number are fully visible and well-lit.
+          Ensure your name, date of birth and ID number are fully visible and well-lit.
         </Text>
       </View>
 
@@ -892,6 +908,10 @@ const styles = StyleSheet.create({
   previewContainer: { marginTop: SPACING.md, position: 'relative' },
   preview: { width: '100%', height: 200, borderRadius: 12, resizeMode: 'cover' },
   removeButton: { position: 'absolute', top: 8, right: 8 },
+  imageAddedBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  imageAddedText: { fontSize: FONTS.sizes.sm, color: COLORS.success, fontWeight: '600' },
+  cropHintBox: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.sm, backgroundColor: '#FEF3C7', padding: SPACING.md, borderRadius: 10, marginBottom: SPACING.md, borderLeftWidth: 3, borderLeftColor: COLORS.warning },
+  cropHintText: { flex: 1, fontSize: FONTS.sizes.sm, color: '#92400E', lineHeight: 20 },
   
   infoBox: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.sm, backgroundColor: COLORS.infoLight, padding: SPACING.md, borderRadius: 12, marginTop: SPACING.lg },
   infoText: { flex: 1, fontSize: FONTS.sizes.sm, color: COLORS.info },
