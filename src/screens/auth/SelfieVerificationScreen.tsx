@@ -316,6 +316,8 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
     setSelfieImage(null);
     setVerificationResult(null);
     setProcessingStep('liveness');
+    // Reset cooldown so user can retry immediately
+    LiveDetectionService.getInstance().resetCooldown();
     setStep('camera');
   };
 

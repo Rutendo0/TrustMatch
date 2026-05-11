@@ -30,7 +30,7 @@ export interface LiveDetectionResult {
 export class LiveDetectionService {
   private static instance: LiveDetectionService;
   private lastDetectionTime: number = 0;
-  private detectionCooldown: number = 300000; // 5 minutes cooldown
+  private detectionCooldown: number = 30000; // 30 seconds cooldown (reduced from 5 min for registration)
 
   static getInstance(): LiveDetectionService {
     if (!LiveDetectionService.instance) {
