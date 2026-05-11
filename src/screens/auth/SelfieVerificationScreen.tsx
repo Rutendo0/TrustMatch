@@ -152,6 +152,10 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
       // Only compare against the MAIN (first) profile photo — that's the one
       // the user chose as their primary photo. One clear match is required.
       const mainPhoto = profilePhotosList[0];
+      console.log('=== PROFILE PHOTO FOR COMPARISON ===');
+      console.log('mainPhoto:', mainPhoto);
+      console.log('profilePhotosList:', profilePhotosList);
+      console.log('=====================================');
       
        const liveDetectionResult = await liveDetectionService.performLiveDetection(photoUri, {
          threshold: 0.35,

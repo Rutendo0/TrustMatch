@@ -103,8 +103,10 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       for (const photo of newPhotos) {
         try {
           const result = await api.uploadProfilePhoto(photo.uri);
+          console.log('Upload result:', JSON.stringify(result));
           // result contains the uploaded photo with Cloudinary URL
           const cloudUrl = result?.url || result?.photo?.url || photo.uri;
+          console.log('Using URL for face comparison:', cloudUrl);
           cloudinaryUrls.push(cloudUrl);
         } catch (uploadError: any) {
           console.error('Photo upload error:', uploadError?.response?.data || uploadError?.message);
