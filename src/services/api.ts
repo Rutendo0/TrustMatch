@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system';
 import { registrationProgress } from './RegistrationProgressService';
 
 // Lightweight event emitter — React Native can't use Node's 'events' module
@@ -485,9 +486,9 @@ async getProfileInsights() {
           if (uri.startsWith('http://') || uri.startsWith('https://')) {
             // Remote URL — download to temp file first, then upload as file
             try {
-              const FileSystem = require('expo-file-system');
               const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
               await FileSystem.downloadAsync(uri, tempPath);
+              console.log('Downloaded remote image to:', tempPath);
               formData.append(fieldName, {
                 uri: tempPath,
                 type: 'image/jpeg',
