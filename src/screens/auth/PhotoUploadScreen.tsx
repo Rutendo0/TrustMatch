@@ -97,21 +97,31 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
         console.log('Auth check failed, continuing:', authErr);
       }
 
-      // Only upload photos that haven't been uploaded yet
+      // Upload photos and collect Cloudinary URLs
+      const cloudinaryUrls: string[] = [];
       const newPhotos = photos.filter(p => !p.uploaded);
       for (const photo of newPhotos) {
         try {
-          await api.uploadProfilePhoto(photo.uri);
+          const result = await api.uploadProfilePhoto(photo.uri);
+          // result contains the uploaded photo with Cloudinary URL
+          const cloudUrl = result?.url || result?.photo?.url || photo.uri;
+          cloudinaryUrls.push(cloudUrl);
         } catch (uploadError: any) {
           console.error('Photo upload error:', uploadError?.response?.data || uploadError?.message);
+          cloudinaryUrls.push(photo.uri); // fallback to local URI
         }
       }
 
+      // Use Cloudinary URLs for face comparison (DeepFace needs accessible URLs)
+      const photoUrlsForVerification = cloudinaryUrls.length > 0 
+        ? cloudinaryUrls 
+        : photos.map(p => p.uri);
+
       navigation.navigate('SelfieVerification', {
-        formData: { ...formData, photos: photos.map(p => p.uri) },
+        formData: { ...formData, photos: photoUrlsForVerification },
         idFrontImage: formData?.idFrontImage,
         idBackImage: formData?.idBackImage,
-        profilePhotos: photos.map(p => p.uri),
+        profilePhotos: photoUrlsForVerification,
       });
     } catch (error: any) {
       console.error('Photo upload error:', error?.response?.data || error);
