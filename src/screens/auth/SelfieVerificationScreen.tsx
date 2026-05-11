@@ -56,13 +56,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
     setStep('camera');
   };
 
-  const [isCameraReady, setIsCameraReady] = useState(false);
-
   const takeSelfie = async () => {
-    if (!isCameraReady) {
-      Alert.alert('Camera not ready', 'Please wait a moment and try again.');
-      return;
-    }
     if (cameraRef.current) {
       try {
         console.log('Taking selfie...');
@@ -312,7 +306,6 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
     setSelfieImage(null);
     setVerificationResult(null);
     setProcessingStep('liveness');
-    setIsCameraReady(false);
     setStep('camera');
   };
 
@@ -361,7 +354,6 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         ref={cameraRef}
         style={styles.camera}
         facing={facing}
-        onCameraReady={() => setIsCameraReady(true)}
       />
       <View style={[StyleSheet.absoluteFill, styles.cameraOverlay]}>
         <TouchableOpacity
@@ -394,10 +386,9 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.captureButton, !isCameraReady && { opacity: 0.5 }]} 
+            style={styles.captureButton} 
             onPress={takeSelfie}
             activeOpacity={0.8}
-            disabled={!isCameraReady}
           >
             <View style={styles.captureButtonInner}>
               <Ionicons name="camera" size={24} color={COLORS.white} />
