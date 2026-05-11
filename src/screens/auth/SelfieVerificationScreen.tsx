@@ -161,11 +161,21 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
        });
       
       console.log('Live detection result:', liveDetectionResult);
+      console.log('=== LIVE DETECTION DETAILS ===');
+      console.log('isMatch:', liveDetectionResult.isMatch);
+      console.log('similarity:', liveDetectionResult.similarity);
+      console.log('storedPhotosMatched:', liveDetectionResult.storedPhotosMatched);
+      console.log('totalStoredPhotos:', liveDetectionResult.totalStoredPhotos);
+      console.log('error:', liveDetectionResult.error);
+      console.log('selfieWithProfiles:', JSON.stringify(liveDetectionResult.details?.selfieWithProfiles));
+      console.log('==============================');
       
       if (!liveDetectionResult.success || !liveDetectionResult.isMatch) {
+        const reason = liveDetectionResult.error || 
+          `Similarity: ${(liveDetectionResult.similarity * 100).toFixed(0)}%, Matches: ${liveDetectionResult.storedPhotosMatched}/${liveDetectionResult.totalStoredPhotos}`;
         Alert.alert(
           'Live Detection Failed',
-          'We could not verify that this is the same person in your profile photos. Please ensure you are using the same lighting and facial expression.',
+          `We could not verify that this is the same person in your profile photos.\n\nDetails: ${reason}\n\nPlease ensure good lighting and look directly at the camera.`,
           [{ text: 'Retake Selfie', onPress: retakeSelfie }]
         );
         return;
