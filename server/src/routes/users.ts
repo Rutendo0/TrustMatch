@@ -7,14 +7,14 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import * as faceapi from 'face-api.js';
-import { Canvas, loadImage } from 'canvas';
+import { Canvas, Image, loadImage } from 'canvas';
 
 // Fix for face-api.js in Node.js environment
 faceapi.env.setEnv({
   Canvas: typeof Canvas !== 'undefined' ? Canvas : (globalThis.Canvas as any),
   Image: typeof Image !== 'undefined' ? Image : (globalThis.Image as any),
   fetch: globalThis.fetch,
-  readFile: fs.readFileSync,
+  readFile: (filePath: string) => Promise.resolve(fs.readFileSync(filePath)),
 });
 
 // Configure face-api.js models path
@@ -672,8 +672,8 @@ router.post('/verify-face', uploadFaceImages, async (req: AuthRequest, res: Resp
       return canvas;
     };
 
-    let img1Canvas: HTMLCanvasElement;
-    let img2Canvas: HTMLCanvasElement;
+    let img1Canvas: Canvas;
+    let img2Canvas: Canvas;
 
     try {
       [img1Canvas, img2Canvas] = await Promise.all([
