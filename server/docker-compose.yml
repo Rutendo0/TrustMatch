@@ -36,6 +36,7 @@ services:
     volumes:
       - uploads:/app/uploads
       - logs:/app/logs
+      - face-models:/app/models  # Persist face-api.js models
     networks:
       - trustmatch-network
     healthcheck:
@@ -73,6 +74,7 @@ services:
 volumes:
   uploads:
   logs:
+  face-models:
 
 networks:
   trustmatch-network:

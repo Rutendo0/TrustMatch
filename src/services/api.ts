@@ -460,114 +460,109 @@ async getProfileInsights() {
     return response.data;
   }
 
-   // Face comparison using external backend API
-   // Configure via EXPO_PUBLIC_FACE_VERIFICATION_API_URL environment variable
-   // This should point to your Node.js backend endpoint (e.g., http://localhost:5000/api/users/verify-face)
-   async compareFaces(image1: string, image2: string) {
-     const externalApiUrl = process.env.EXPO_PUBLIC_FACE_VERIFICATION_API_URL;
-     
-     if (!externalApiUrl) {
-       console.warn('Face verification API URL not configured. Set EXPO_PUBLIC_FACE_VERIFICATION_API_URL');
-       return { 
-         success: false, 
-         similarity: 0, 
-         isMatch: false, 
-         message: 'Face verification API not configured' 
-       };
-     }
-     
-     try {
-        // Create FormData with the two images as file uploads
-        const formData = new FormData();
-        
-        // Helper to append image file to FormData for React Native
-        // React Native fetch understands { uri, type, name } objects
-        const appendImageFile = async (uri: string, fieldName: string) => {
-          if (uri.startsWith('http://') || uri.startsWith('https://')) {
-            // Remote URL — download to temp file first, then upload as file
-            try {
-              const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
-              await FileSystem.downloadAsync(uri, tempPath);
-              console.log('Downloaded remote image to:', tempPath);
-              formData.append(fieldName, {
-                uri: tempPath,
-                type: 'image/jpeg',
-                name: `${fieldName}.jpg`,
-              } as any);
-            } catch (downloadErr) {
-              console.error('Failed to download image for comparison:', downloadErr);
-              // Fallback: try sending URL directly
-              formData.append(fieldName, {
-                uri,
-                type: 'image/jpeg',
-                name: `${fieldName}.jpg`,
-              } as any);
-            }
-          } else {
-            // Local file URI — send directly
-            formData.append(fieldName, {
-              uri,
-              type: 'image/jpeg',
-              name: `${fieldName}.jpg`,
-            } as any);
-          }
+  async compareFaces(image1: string, image2: string) {
+    const externalApiUrl = process.env.EXPO_PUBLIC_FACE_VERIFICATION_API_URL;
+    
+    if (!externalApiUrl) {
+      console.warn('EXPO_PUBLIC_FACE_VERIFICATION_API_URL not set');
+      return { success: false, similarity: 0, isMatch: false, message: 'Face verification API not configured' };
+    }
+
+    console.log('[compareFaces] Using endpoint:', externalApiUrl);
+
+    try {
+      const formData = new FormData();
+
+      // Helper to append image file to FormData for React Native
+      // React Native fetch understands { uri, type, name } objects
+      const appendImageFile = async (uri: string, fieldName: string) => {
+        if (uri.startsWith('http://') || uri.startsWith('https://')) {
+          // Remote URL — download to temp file first, then upload as file
+          const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
+          const downloaded = await FileSystem.downloadAsync(uri, tempPath);
+          console.log(`[compareFaces] Downloaded ${fieldName}:`, downloaded.uri, 'status:', downloaded.status);
+          formData.append(fieldName, {
+            uri: downloaded.uri,
+            type: 'image/jpeg',
+            name: `${fieldName}.jpg`,
+          } as any);
+        } else {
+          // Local file URI — send directly
+          console.log(`[compareFaces] Using local ${fieldName}:`, uri.substring(0, 60));
+          formData.append(fieldName, {
+            uri,
+            type: 'image/jpeg',
+            name: `${fieldName}.jpg`,
+          } as any);
+        }
+      };
+
+      await appendImageFile(image1, 'img1');
+      await appendImageFile(image2, 'img2');
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for DeepFace
+
+      const response = await fetch(externalApiUrl, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Face verification failed (${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json();
+
+      // Backend DeepFace response returns:
+      // { verified, distance, threshold, model, similarity_metric }
+      // We convert to our standard format
+      const isMatch = data.verified === true;
+      const similarity = data.distance != null ? (1 - data.distance) : (data.confidence ? data.confidence / 100 : 0);
+      const threshold = data.threshold || 0.68;
+
+      return {
+        success: true,
+        similarity,
+        isMatch,
+        threshold,
+        message: isMatch ? 'Face match confirmed' : 'Faces do not match',
+        rawResponse: {
+          distance: data.distance,
+          verified: data.verified,
+          threshold: data.threshold,
+          model: data.model,
+          similarityMetric: data.similarity_metric,
+          detectorBackend: data.detector_backend,
+          facialAreas: data.facial_areas,
+          match: data.match,
+        }
+      };
+    } catch (error: any) {
+      console.error('Face comparison API error:', error);
+      if (error.name === 'AbortError') {
+        return {
+          success: false,
+          similarity: 0,
+          isMatch: false,
+          message: 'Face verification timed out. Please try again.',
         };
-        
-        await appendImageFile(image1, 'img1');
-        await appendImageFile(image2, 'img2');
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-        
-        const response = await fetch(externalApiUrl, {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-          // Don't set Content-Type - fetch will set it with boundary for FormData
-        });
-        
-        clearTimeout(timeoutId);
-       
-       if (!response.ok) {
-         const errorText = await response.text();
-         throw new Error(`Face verification API error (${response.status}): ${errorText}`);
-       }
-       
-       const data = await response.json();
-       
-       // Backend returns DeepFace response with `verified` boolean and `distance` value
-       // We need to convert to our standard format
-       const isMatch = data.verified === true;
-       const similarity = data.distance ? (1 - data.distance) : (data.confidence ? data.confidence / 100 : 0);
-       const threshold = data.threshold || 0.68;
-       
-       return {
-         success: true,
-         similarity,
-         isMatch,
-         threshold,
-         message: isMatch ? 'Face match confirmed' : 'Faces do not match',
-         // Include extra data for debugging
-         rawResponse: {
-           distance: data.distance,
-           confidence: data.confidence,
-           model: data.model,
-           detectorBackend: data.detector_backend,
-           facialAreas: data.facial_areas,
-         }
-       };
-     } catch (error: any) {
-       console.error('External face comparison error:', error);
-       console.error('Error message:', error?.message);
-       console.error('Error response:', error?.response?.data);
-       return {
-         success: false,
-         similarity: 0,
-         isMatch: false,
-         message: error.message || 'Face comparison failed',
-       };
-     }
-   }
+      }
+      return {
+        success: false,
+        similarity: 0,
+        isMatch: false,
+        message: error.message || 'Face comparison failed',
+      };
+    }
+  }
 
   // Live verification - submit live detection results to backend
   async submitLiveVerification(data: {

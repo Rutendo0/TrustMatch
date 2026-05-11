@@ -3,6 +3,51 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, verifiedAuthMiddleware } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import * as faceapi from 'face-api.js';
+import { Canvas, loadImage } from 'canvas';
+
+// Fix for face-api.js in Node.js environment
+faceapi.env.setEnv({
+  Canvas: typeof Canvas !== 'undefined' ? Canvas : (globalThis.Canvas as any),
+  Image: typeof Image !== 'undefined' ? Image : (globalThis.Image as any),
+  fetch: globalThis.fetch,
+  readFile: fs.readFileSync,
+});
+
+// Configure face-api.js models path
+const MODEL_PATH = path.join(process.cwd(), 'models');
+
+// Load face-api.js models
+let modelsLoaded = false;
+let modelsLoadError: Error | null = null;
+async function loadFaceApiModels() {
+  if (modelsLoaded) return;
+  if (modelsLoadError) throw modelsLoadError;
+  try {
+    try {
+      await faceapi.nets.tinyFaceDetector.loadFromDisk(MODEL_PATH);
+      await faceapi.nets.faceLandmark68Net.loadFromDisk(MODEL_PATH);
+      await faceapi.nets.faceRecognitionNet.loadFromDisk(MODEL_PATH);
+      modelsLoaded = true;
+      console.log('Face-api.js models loaded from local disk');
+      return;
+    } catch {
+      console.log('Local models not found, loading from CDN...');
+    }
+    await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
+    await faceapi.nets.faceLandmark68Net.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
+    await faceapi.nets.faceRecognitionNet.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
+    modelsLoaded = true;
+    console.log('Face-api.js models loaded from CDN');
+  } catch (error: any) {
+    console.error('Error loading face-api.js models:', error?.message || error);
+    modelsLoadError = error;
+    throw error;
+  }
+}
 
 const router = Router();
 
@@ -550,5 +595,202 @@ function calculateAge(dateOfBirth: Date): number {
   }
   return age;
 }
+
+// ── Multer: in-memory storage for face verification (no disk writes) ──────────
+const faceUploadStorage = multer.memoryStorage();
+const uploadFaceImages = multer({
+  storage: faceUploadStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image files are allowed'));
+  },
+}).fields([
+  { name: 'img1', maxCount: 1 },
+  { name: 'img2', maxCount: 1 },
+]);
+
+// ── POST /api/users/verify-face ─────────────────────────────────────────────
+// Compares two face images using face-api.js (TinyFaceDetector + FaceRecognitionNet)
+// Called from the React Native app during selfie verification
+router.post('/verify-face', uploadFaceImages, async (req: AuthRequest, res: Response) => {
+  let errorDetails = '';
+  try {
+    const files = req.files as Express.Multer.File[];
+
+    if (!files || files.length < 2) {
+      return res.status(400).json({
+        error: 'Two images (img1 and img2) are required',
+        verified: false,
+        distance: 1,
+        threshold: 0.5,
+        similarity: 0,
+      });
+    }
+
+    const img1File = files.find(f => f.fieldname === 'img1');
+    const img2File = files.find(f => f.fieldname === 'img2');
+
+    if (!img1File || !img2File) {
+      return res.status(400).json({
+        error: 'Both img1 and img2 must be provided',
+        verified: false,
+        distance: 1,
+        threshold: 0.5,
+        similarity: 0,
+      });
+    }
+
+    // Validate image files are non-empty
+    if (img1File.size === 0 || img2File.size === 0) {
+      return res.status(400).json({
+        error: 'One or both images are empty',
+        verified: false,
+        distance: 1,
+        threshold: 0.5,
+        similarity: 0,
+      });
+    }
+
+    console.log('Face verification request received');
+    console.log('Image 1:', img1File.originalname, img1File.mimetype, img1File.size, 'bytes');
+    console.log('Image 2:', img2File.originalname, img2File.mimetype, img2File.size, 'bytes');
+
+    // Load face-api.js models
+    console.log('Loading face-api.js models...');
+    await loadFaceApiModels();
+
+    // Load images from buffers into canvas using face-api loadImage
+    const loadImageFromBuffer = async (buffer: Buffer): Promise<HTMLCanvasElement> => {
+      // Use face-api's loadImage which handles image decoding via canvas
+      const img = await loadImage(buffer);
+
+      // Create canvas matching image dimensions
+      const canvas = new Canvas(img.width, img.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, img.width, img.height);
+      return canvas;
+    };
+
+    let img1Canvas: HTMLCanvasElement;
+    let img2Canvas: HTMLCanvasElement;
+
+    try {
+      [img1Canvas, img2Canvas] = await Promise.all([
+        loadImageFromBuffer(img1File.buffer),
+        loadImageFromBuffer(img2File.buffer),
+      ]);
+    } catch (imgError: any) {
+      console.error('Error loading images from buffer:', imgError);
+      return res.status(400).json({
+        error: 'Failed to process images. Please upload valid image files.',
+        details: imgError.message,
+        verified: false,
+        distance: 1,
+        threshold: 0.5,
+        similarity: 0,
+      });
+    }
+
+    // Detect faces and compute descriptors
+    console.log('Detecting faces...');
+    const detector = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 416,
+      scoreThreshold: 0.4,  // Lower threshold to be more permissive
+    });
+
+    let detection1: any;
+    let detection2: any;
+
+    try {
+      const [det1, det2] = await Promise.all([
+        faceapi.detectSingleFace(img1Canvas, detector).withFaceLandmarks().withFaceDescriptor(),
+        faceapi.detectSingleFace(img2Canvas, detector).withFaceLandmarks().withFaceDescriptor(),
+      ]);
+      detection1 = det1;
+      detection2 = det2;
+    } catch (faceError: any) {
+      console.error('Face detection error:', faceError);
+      return res.status(500).json({
+        error: 'Face detection failed',
+        details: faceError.message,
+        verified: false,
+        distance: 1,
+        threshold: 0.5,
+        similarity: 0,
+      });
+    }
+
+    if (!detection1 || !detection2) {
+      const missingFace = !detection1 ? 'first image' : 'second image';
+      console.log(`Face not detected in ${missingFace}`);
+      return res.json({
+        verified: false,
+        distance: 1,
+        threshold: 0.5,
+        similarity: 0,
+        isMatch: false,
+        message: `No face detected in ${missingFace}. Please ensure your face is clearly visible.`,
+        model: 'face-api.js',
+        detector_backend: 'tinyFaceDetector',
+        facial_areas: {
+          img1: detection1 ? { x: 0, y: 0, w: 0, h: 0 } : null,
+          img2: detection2 ? { x: 0, y: 0, w: 0, h: 0 } : null,
+        },
+      });
+    }
+
+    // Compute Euclidean distance between face descriptors
+    const distance = faceapi.euclideanDistance(detection1.descriptor, detection2.descriptor);
+
+    // Convert distance to similarity score
+    // Distance: 0 = identical, higher = more different
+    // Similarity: 1 = identical, 0 = completely different
+    const threshold = 0.5;
+    const similarity = 1 - distance;
+    const isMatch = similarity >= threshold;
+
+    console.log(`Face verification result:`);
+    console.log(`  Distance: ${distance.toFixed(4)}`);
+    console.log(`  Similarity: ${(similarity * 100).toFixed(1)}%`);
+    console.log(`  Threshold: ${(threshold * 100).toFixed(0)}%`);
+    console.log(`  Is Match: ${isMatch}`);
+
+    return res.json({
+      verified: isMatch,
+      distance: Math.round(distance * 10000) / 10000,
+      threshold,
+      similarity: Math.round(Math.max(0, Math.min(1, similarity)) * 100) / 100,
+      isMatch,
+      model: 'face-api.js',
+      detector_backend: 'tinyFaceDetector',
+      match: isMatch,
+      confidence: Math.round(Math.max(0, Math.min(1, similarity)) * 100),
+      facial_areas: {
+        img1: { x: 0, y: 0, w: 0, h: 0 },
+        img2: { x: 0, y: 0, w: 0, h: 0 },
+      },
+      message: isMatch
+        ? `Face match confirmed (${(similarity * 100).toFixed(0)}% similarity)`
+        : `Faces do not match (${(similarity * 100).toFixed(0)}% similarity). Threshold: ${(threshold * 100).toFixed(0)}%`,
+    });
+
+  } catch (error: any) {
+    console.error('Face verification error:', error);
+    console.error('Stack:', error?.stack?.substring(0, 500));
+    errorDetails = error?.message || String(error);
+
+    return res.status(500).json({
+      error: 'Face verification failed',
+      details: errorDetails,
+      stack: process.env.NODE_ENV === 'development' ? error?.stack?.substring(0, 500) : undefined,
+      verified: false,
+      distance: 1,
+      threshold: 0.5,
+      similarity: 0,
+      match: false,
+    });
+  }
+});
 
 export default router;

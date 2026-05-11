@@ -16,7 +16,9 @@ RUN apk add --no-cache \
     giflib-dev \
     librsvg-dev \
     pixman-dev \
-    pkgconfig
+    pkgconfig \
+    curl \
+    unzip
 
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -30,6 +32,24 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 RUN chmod +x start.sh
+
+# Pre-download face-api.js models during build to avoid CDN dependency at runtime
+RUN mkdir -p models && \
+    echo "Downloading face-api.js models..." && \
+    curl -sfL -o models/tiny_face_detector_model-weights_manifest.json \
+        "https://justadudewhokeys.github.io/face-api.js/models/tiny_face_detector_model-weights_manifest.json" && \
+    curl -sfL -o models/tiny_face_detector_model-shard1 \
+        "https://justadudewhokeys.github.io/face-api.js/models/tiny_face_detector_model-shard1" && \
+    curl -sfL -o models/face_landmark_68_model-weights_manifest.json \
+        "https://justadudewhokeys.github.io/face-api.js/models/face_landmark_68_model-weights_manifest.json" && \
+    curl -sfL -o models/face_landmark_68_model-shard1 \
+        "https://justadudewhokeys.github.io/face-api.js/models/face_landmark_68_model-shard1" && \
+    curl -sfL -o models/face_recognition_model-weights_manifest.json \
+        "https://justadudewhokeys.github.io/face-api.js/models/face_recognition_model-weights_manifest.json" && \
+    curl -sfL -o models/face_recognition_model-shard1 \
+        "https://justadudewhokeys.github.io/face-api.js/models/face_recognition_model-shard1" && \
+    echo "face-api.js models downloaded successfully" || \
+    echo "WARNING: Failed to download face-api.js models — will try at runtime"
 
 # ── Production runner ────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -46,7 +66,8 @@ RUN apk add --no-cache \
     giflib \
     librsvg \
     pixman \
-    openssl
+    openssl \
+    curl
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nodejs
@@ -56,6 +77,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/models ./models
 
 COPY --from=builder /app/start.sh ./start.sh
 
