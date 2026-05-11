@@ -10,9 +10,14 @@ import * as faceapi from 'face-api.js';
 import { Canvas, Image, loadImage } from 'canvas';
 
 // Fix for face-api.js in Node.js environment
-faceapi.env.setEnv({
-  Canvas: typeof Canvas !== 'undefined' ? Canvas : (globalThis.Canvas as any),
-  Image: typeof Image !== 'undefined' ? Image : (globalThis.Image as any),
+(faceapi.env as any).setEnv({
+  Canvas,
+  Image,
+  ImageData: (globalThis as any).ImageData,
+  Video: (globalThis as any).Video,
+  CanvasRenderingContext2D: (globalThis as any).CanvasRenderingContext2D,
+  createCanvasElement: () => new Canvas(0, 0) as any,
+  createImageElement: () => new Image() as any,
   fetch: globalThis.fetch,
   readFile: (filePath: string) => Promise.resolve(fs.readFileSync(filePath)),
 });
@@ -661,19 +666,16 @@ router.post('/verify-face', uploadFaceImages, async (req: AuthRequest, res: Resp
     await loadFaceApiModels();
 
     // Load images from buffers into canvas using face-api loadImage
-    const loadImageFromBuffer = async (buffer: Buffer): Promise<HTMLCanvasElement> => {
-      // Use face-api's loadImage which handles image decoding via canvas
+    const loadImageFromBuffer = async (buffer: Buffer): Promise<any> => {
       const img = await loadImage(buffer);
-
-      // Create canvas matching image dimensions
       const canvas = new Canvas(img.width, img.height);
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, img.width, img.height);
-      return canvas;
+      ctx.drawImage(img as any, 0, 0, img.width, img.height);
+      return canvas as any;
     };
 
-    let img1Canvas: Canvas;
-    let img2Canvas: Canvas;
+    let img1Canvas: any;
+    let img2Canvas: any;
 
     try {
       [img1Canvas, img2Canvas] = await Promise.all([
