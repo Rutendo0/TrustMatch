@@ -481,16 +481,39 @@ async getProfileInsights() {
         
         // Helper to append image file to FormData for React Native
         // React Native fetch understands { uri, type, name } objects
-        const appendImageFile = (uri: string, fieldName: string) => {
-          formData.append(fieldName, {
-            uri,
-            type: 'image/jpeg',
-            name: `${fieldName}.jpg`,
-          } as any);
+        const appendImageFile = async (uri: string, fieldName: string) => {
+          if (uri.startsWith('http://') || uri.startsWith('https://')) {
+            // Remote URL — download to temp file first, then upload as file
+            try {
+              const FileSystem = require('expo-file-system');
+              const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
+              await FileSystem.downloadAsync(uri, tempPath);
+              formData.append(fieldName, {
+                uri: tempPath,
+                type: 'image/jpeg',
+                name: `${fieldName}.jpg`,
+              } as any);
+            } catch (downloadErr) {
+              console.error('Failed to download image for comparison:', downloadErr);
+              // Fallback: try sending URL directly
+              formData.append(fieldName, {
+                uri,
+                type: 'image/jpeg',
+                name: `${fieldName}.jpg`,
+              } as any);
+            }
+          } else {
+            // Local file URI — send directly
+            formData.append(fieldName, {
+              uri,
+              type: 'image/jpeg',
+              name: `${fieldName}.jpg`,
+            } as any);
+          }
         };
         
-        appendImageFile(image1, 'img1');
-        appendImageFile(image2, 'img2');
+        await appendImageFile(image1, 'img1');
+        await appendImageFile(image2, 'img2');
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
@@ -534,6 +557,8 @@ async getProfileInsights() {
        };
      } catch (error: any) {
        console.error('External face comparison error:', error);
+       console.error('Error message:', error?.message);
+       console.error('Error response:', error?.response?.data);
        return {
          success: false,
          similarity: 0,

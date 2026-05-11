@@ -54,6 +54,8 @@ export const serverFaceCompare = async (
 ): Promise<ServerFaceCompareResult> => {
   try {
     console.log('Calling external face comparison API...');
+    console.log('Image1 type:', image1?.startsWith('http') ? 'URL' : image1?.startsWith('file') ? 'local file' : 'other', image1?.substring(0, 80));
+    console.log('Image2 type:', image2?.startsWith('http') ? 'URL' : image2?.startsWith('file') ? 'local file' : 'other', image2?.substring(0, 80));
     
     const response = await api.compareFaces(image1, image2);
     
