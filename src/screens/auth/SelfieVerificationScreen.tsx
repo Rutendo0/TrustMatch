@@ -52,7 +52,17 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
   ];
 
   const handleStartCamera = async () => {
-    // Use on-device camera + local AI verification (Didit external API is optional)
+    if (!permission?.granted) {
+      const result = await requestPermission();
+      if (!result.granted) {
+        Alert.alert(
+          'Camera Permission Required',
+          'TrustMatch needs camera access to verify your identity. Please enable it in your phone settings.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
     setStep('camera');
   };
 
@@ -348,7 +358,30 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
     </View>
   );
 
-  const renderCamera = () => (
+  const renderCamera = () => {
+    if (!permission?.granted) {
+      return (
+        <View style={[styles.cameraContainer, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
+          <Ionicons name="camera-off-outline" size={60} color="white" />
+          <Text style={{ color: 'white', fontSize: 16, textAlign: 'center', marginTop: 16, paddingHorizontal: 32 }}>
+            Camera permission is required.{'\n'}Please allow camera access and try again.
+          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 24, backgroundColor: COLORS.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24 }}
+            onPress={async () => {
+              const result = await requestPermission();
+              if (!result.granted) {
+                Alert.alert('Permission Denied', 'Please enable camera access in your phone settings.');
+              }
+            }}
+          >
+            <Text style={{ color: 'white', fontWeight: '600' }}>Grant Permission</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
     <View style={styles.cameraContainer}>
       <CameraView
         ref={cameraRef}
@@ -399,7 +432,8 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         </View>
       </View>
     </View>
-  );
+    );
+  };
 
   const renderProcessing = () => {
     console.log('Rendering processing screen, selfieImage:', selfieImage);
