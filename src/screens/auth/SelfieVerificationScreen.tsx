@@ -71,8 +71,9 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
       try {
         console.log('Taking selfie...');
         const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.8,
+          quality: 0.5,
           skipProcessing: false,
+          exif: false,
         });
         console.log('Photo taken:', photo.uri);
         console.log('Photo object:', photo);
@@ -158,7 +159,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
       console.log('=====================================');
       
        const liveDetectionResult = await liveDetectionService.performLiveDetection(photoUri, {
-         threshold: 0.35,
+         threshold: 0.40,
          requireMinimumMatches: 1,
          includeVerificationPhotos: false,
          storedPhotos: [mainPhoto],

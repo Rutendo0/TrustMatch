@@ -1,15 +1,16 @@
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type RegistrationStep = 
   | 'idle'
-  | 'details'       // ID verification - details step
-  | 'id_upload'     // ID verification - upload ID
-  | 'id_back'       // ID verification - upload back of ID (if drivers license)
-  | 'id_verifying'  // ID verification - processing
-  | 'id_success'    // ID verification - completed
-  | 'photos'        // Photo upload step
-  | 'selfie'        // Selfie verification step
-  | 'completed';    // All steps completed
+  | 'details'
+  | 'id_upload'
+  | 'id_back'
+  | 'id_verifying'
+  | 'id_success'
+  | 'photos'
+  | 'selfie'
+  | 'completed';
 
 interface RegistrationProgress {
   step: RegistrationStep;
@@ -26,7 +27,6 @@ interface RegistrationProgress {
     idBackImage?: string;
     extractedData?: any;
     photos?: string[];
-    // Store any data entered at each step
     [key: string]: any;
   };
   lastUpdated: string;
@@ -34,10 +34,42 @@ interface RegistrationProgress {
 
 const STORAGE_KEY = 'registration_progress';
 
+// Safe storage that falls back to AsyncStorage when SecureStore isn't available (Expo Go)
+const storage = {
+  async setItem(key: string, value: string): Promise<void> {
+    try {
+      if (SecureStore?.setItemAsync) {
+        await SecureStore.setItemAsync(key, value);
+      } else {
+        await AsyncStorage.setItem(key, value);
+      }
+    } catch {
+      await AsyncStorage.setItem(key, value);
+    }
+  },
+  async getItem(key: string): Promise<string | null> {
+    try {
+      if (SecureStore?.getItemAsync) {
+        return await SecureStore.getItemAsync(key);
+      }
+      return await AsyncStorage.getItem(key);
+    } catch {
+      return await AsyncStorage.getItem(key);
+    }
+  },
+  async deleteItem(key: string): Promise<void> {
+    try {
+      if (SecureStore?.deleteItemAsync) {
+        await SecureStore.deleteItemAsync(key);
+      }
+      await AsyncStorage.removeItem(key);
+    } catch {
+      await AsyncStorage.removeItem(key);
+    }
+  },
+};
+
 class RegistrationProgressService {
-  /**
-   * Save the current registration progress
-   */
   async saveProgress(step: RegistrationStep, formData: Record<string, any>): Promise<void> {
     try {
       const progress: RegistrationProgress = {
@@ -45,21 +77,16 @@ class RegistrationProgressService {
         formData,
         lastUpdated: new Date().toISOString(),
       };
-      await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(progress));
+      await storage.setItem(STORAGE_KEY, JSON.stringify(progress));
     } catch (error) {
       console.error('Failed to save registration progress:', error);
     }
   }
 
-  /**
-   * Get the current registration progress
-   */
   async getProgress(): Promise<RegistrationProgress | null> {
     try {
-      const data = await SecureStore.getItemAsync(STORAGE_KEY);
-      if (data) {
-        return JSON.parse(data) as RegistrationProgress;
-      }
+      const data = await storage.getItem(STORAGE_KEY);
+      if (data) return JSON.parse(data) as RegistrationProgress;
       return null;
     } catch (error) {
       console.error('Failed to get registration progress:', error);
@@ -67,37 +94,23 @@ class RegistrationProgressService {
     }
   }
 
-  /**
-   * Clear the registration progress (when user completes registration or logs in)
-   */
   async clearProgress(): Promise<void> {
     try {
-      await SecureStore.deleteItemAsync(STORAGE_KEY);
+      await storage.deleteItem(STORAGE_KEY);
     } catch (error) {
       console.error('Failed to clear registration progress:', error);
     }
   }
 
-  /**
-   * Check if there's an incomplete registration in progress
-   */
   async hasIncompleteRegistration(): Promise<boolean> {
     const progress = await this.getProgress();
     return progress !== null && progress.step !== 'completed';
   }
 
-  /**
-   * Get the next step to resume from
-   * Returns the screen name to navigate to
-   */
   async getResumeStep(): Promise<{ screen: string; formData: any } | null> {
     const progress = await this.getProgress();
-    
-    if (!progress || progress.step === 'completed' || progress.step === 'idle') {
-      return null;
-    }
+    if (!progress || progress.step === 'completed' || progress.step === 'idle') return null;
 
-    // Map registration steps to screen names
     const stepToScreen: Record<RegistrationStep, string> = {
       'idle': 'Register',
       'details': 'IDVerification',
@@ -110,14 +123,11 @@ class RegistrationProgressService {
       'completed': 'MainTabs',
     };
 
-    const screen = stepToScreen[progress.step];
-    
-    // For steps that are between 'details' and 'id_success', go to IDVerification
-    if (progress.step === 'id_upload' || progress.step === 'id_back' || progress.step === 'id_verifying') {
+    if (['id_upload', 'id_back', 'id_verifying'].includes(progress.step)) {
       return { screen: 'IDVerification', formData: progress.formData };
     }
-    
-    return { screen, formData: progress.formData };
+
+    return { screen: stepToScreen[progress.step], formData: progress.formData };
   }
 }
 

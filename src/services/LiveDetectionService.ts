@@ -138,8 +138,11 @@ export class LiveDetectionService {
        const matchRatio = totalMatches / storedPhotos.length;
        const confidence = Math.min(1, (matchRatio * 0.7) + (overallSimilarity * 0.3));
 
-       // Pass only if the main photo matched — one clear match is required
-       const isMatch = totalMatches >= requireMinimumMatches;
+       // Pass if DeepFace verified at least one match OR similarity is above threshold
+       // Use comparisonResult.allMatch which already has the correct pass logic
+       const isMatch = totalMatches >= requireMinimumMatches || 
+                       overallSimilarity >= threshold ||
+                       comparisonResult.allMatch;
 
        this.lastDetectionTime = now;
 

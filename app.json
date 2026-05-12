@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "TrustMatch",
-    "slug": "trustmatch",
+    "slug": "trust-match",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -12,9 +12,8 @@
       "backgroundColor": "#DC2626"
     },
     "updates": {
-      "url": "https://u.expo.dev/77da5cad-2126-41ce-8d2b-834f10f2bc16",
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD"
+      "url": "https://u.expo.dev/2665516f-2327-484f-9b1b-b4541707759b",
+      "enabled": false
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -56,9 +55,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "77da5cad-2126-41ce-8d2b-834f10f2bc16"
+        "projectId": "2665516f-2327-484f-9b1b-b4541707759b"
       }
     },
-    "owner": "rutend"
+    "owner": "brighttinashe"
   }
 }

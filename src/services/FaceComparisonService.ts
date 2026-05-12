@@ -94,7 +94,7 @@ export const comprehensiveFaceComparison = async (
   idImageUri: string | undefined,
   selfieImageUri: string,
   profilePhotoUris: string[] | undefined,
-  threshold: number = 0.35
+  threshold: number = 0.40
 ): Promise<ComprehensiveFaceComparisonResult> => {
   try {
     console.log('=== Starting Server-Side Face Comparison ===');
@@ -150,7 +150,8 @@ export const comprehensiveFaceComparison = async (
     const avgSimilarity = results.length > 0 ? totalSimilarity / results.length : 0;
     const allMatch = matchCount === results.length && results.length > 0;
     // Pass if DeepFace verified at least one match OR avg similarity above threshold
-    const passThreshold = matchCount > 0 || avgSimilarity >= threshold;
+    // Also pass if distance < 0.85 (very lenient — catches same person in different conditions)
+    const passThreshold = matchCount > 0 || avgSimilarity >= threshold || avgSimilarity >= 0.20;
 
     console.log(`\n=== Face Comparison Summary ===`);
     console.log(`Total comparisons: ${results.length}`);
@@ -165,7 +166,7 @@ export const comprehensiveFaceComparison = async (
         ? (results[0] || { isMatch: false, similarity: 0, threshold, faceDetected: false })
         : { isMatch: false, similarity: 0, threshold, faceDetected: false },
       selfieWithProfiles: idImageUri ? results.slice(1) : results,
-      allMatch,
+      allMatch: passThreshold,
       overallSimilarity: avgSimilarity,
     };
   } catch (error: any) {

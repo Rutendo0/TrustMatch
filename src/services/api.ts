@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { registrationProgress } from './RegistrationProgressService';
 
 // Lightweight event emitter — React Native can't use Node's 'events' module
@@ -225,7 +225,7 @@ async init() {
     const response = await this.client.post(
       '/verification/extract-document-text',
       { imageUrl },
-      { timeout: 20_000 }, // fail fast — OCR is best-effort, not required
+      { timeout: 90_000 }, // 90s — OCR via Tesseract can be slow on cold start
     );
     return response.data;
   }
@@ -477,9 +477,13 @@ async getProfileInsights() {
       // React Native fetch understands { uri, type, name } objects
       const appendImageFile = async (uri: string, fieldName: string) => {
         if (uri.startsWith('http://') || uri.startsWith('https://')) {
-          // Remote URL — download to temp file first, then upload as file
+          // For Cloudinary URLs, request highest quality
+          let downloadUri = uri;
+          if (uri.includes('cloudinary.com') && uri.includes('/upload/')) {
+            downloadUri = uri.replace('/upload/', '/upload/q_100,f_jpg/');
+          }
           const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
-          const downloaded = await FileSystem.downloadAsync(uri, tempPath);
+          const downloaded = await FileSystem.downloadAsync(downloadUri, tempPath);
           console.log(`[compareFaces] Downloaded ${fieldName}:`, downloaded.uri, 'status:', downloaded.status);
           formData.append(fieldName, {
             uri: downloaded.uri,
