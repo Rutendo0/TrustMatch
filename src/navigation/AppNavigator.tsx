@@ -101,8 +101,8 @@ const MainTabs = () => {
     fetchUserPhoto();
     fetchUnreadCount();
 
-    // Refresh unread count every 30 seconds
-    const interval = setInterval(fetchUnreadCount, 30000);
+    // Refresh unread count every 10 seconds
+    const interval = setInterval(fetchUnreadCount, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -178,6 +178,7 @@ const MainTabs = () => {
         headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.white },
         headerTitleStyle: { color: colors.text, fontWeight: 'bold', fontSize: 18 },
+        tabBarBadge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined,
         headerRight: () => (
           <View style={{ marginRight: 16 }}>
             {userPhoto ? (

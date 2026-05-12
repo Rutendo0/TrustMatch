@@ -947,4 +947,34 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
     fontStyle: 'italic',
   },
+  // Emergency contact relationship selector
+  relationOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginTop: SPACING.xs,
+  },
+  relationBtn: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  relationBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+  },
+  relationText: {
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text,
+    fontWeight: '500',
+  },
+  relationTextActive: {
+    color: COLORS.white,
+    fontWeight: '700',
+  },
 });
