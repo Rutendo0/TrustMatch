@@ -143,10 +143,40 @@ function extractNamesFromOcrText(text: string): { firstName?: string; lastName?:
   if (!lastName || !firstName) {
     const afterIdMatch = mergedText.match(/\d{2}-\d{7}\s+\w+\s+\d+\s+(\w+)\s+\w+\s+([A-Z]{3,})\s+([A-Z]{3,})/);
     if (afterIdMatch) {
-      // afterIdMatch[2] = surname, afterIdMatch[3] = first name
       const IGNORE = new Set(['CIT', 'THE', 'AND', 'FOR']);
       if (!lastName && afterIdMatch[2] && !IGNORE.has(afterIdMatch[2])) lastName = afterIdMatch[2];
       if (!firstName && afterIdMatch[3] && !IGNORE.has(afterIdMatch[3])) firstName = afterIdMatch[3];
+    }
+  }
+
+  // Strategy 4: Look for names after "SURNAME" and "GIVEN NAME" / "NAMES" labels
+  // Some IDs use "GIVEN NAME" or "NAMES" instead of "FIRST NAME"
+  if (!firstName) {
+    const givenNameMatch = mergedText.match(
+      /(?:GIVEN\s+NAME|NAMES|FORENAME)\s+([A-Z]{2,}(?:\s+[A-Z]{2,})*?)(?=\s+DATE|\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE|\s+GENDER|\s*$)/
+    );
+    if (givenNameMatch?.[1]) {
+      const IGNORE = new Set(['DATE', 'BIRTH', 'VILLAGE', 'PLACE', 'ORIGIN', 'ISSUE', 'GENDER', 'NATIONAL', 'ZIMBABWE']);
+      const words = givenNameMatch[1].trim().split(/\s+/).filter(w => w.length >= 2 && !IGNORE.has(w));
+      if (words.length > 0) firstName = words.join(' ');
+    }
+  }
+
+  // Strategy 5: Extract any sequence of 2+ uppercase words that appear between
+  // the ID number and the date — these are almost always the name
+  if (!lastName && !firstName) {
+    const nameBlockMatch = mergedText.match(
+      /(?:\d{2}-\d{7}|\d{6,})\s+(?:[A-Z]\s+)?(?:\d+\s+)?(?:[A-Z]{1,3}\s+)?([A-Z]{3,}(?:\s+[A-Z]{3,})+)\s+\d{2}[\/\-]\d{2}[\/\-]\d{4}/
+    );
+    if (nameBlockMatch?.[1]) {
+      const IGNORE = new Set(['CIT', 'THE', 'AND', 'FOR', 'REP', 'NAT']);
+      const words = nameBlockMatch[1].trim().split(/\s+/).filter(w => w.length >= 3 && !IGNORE.has(w));
+      if (words.length >= 2) {
+        lastName = words[0];
+        firstName = words.slice(1).join(' ');
+      } else if (words.length === 1) {
+        lastName = words[0];
+      }
     }
   }
 
