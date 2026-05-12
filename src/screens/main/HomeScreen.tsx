@@ -238,7 +238,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         age: p?.age || 25,
         bio: p?.bio || 'No bio available',
         distance: p?.city || p?.country || 'Unknown location',
-        photos: p?.photos?.length > 0 ? p.photos : ['https://via.placeholder.com/400'],
+        photos: p?.photos?.length > 0 
+          ? p.photos.map((ph: any) => typeof ph === 'string' ? ph : ph?.url).filter(Boolean)
+          : ['https://via.placeholder.com/400'],
         isVerified: p?.isVerified || false,
         trustScore: p?.trustScore || 85,
         compatibility: p?.compatibility || p?.trustScore || Math.floor(Math.random() * 20) + 75,

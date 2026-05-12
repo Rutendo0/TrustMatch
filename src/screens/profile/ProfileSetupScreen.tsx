@@ -122,17 +122,17 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
   const steps = ['About You', 'Interests & Hobbies', 'Preferences', 'Goals & Values', 'Safety First'];
 
   const toggleInterest = (interestId: string, interestName?: string) => {
-    // Handle custom interest "Other" button
     if (interestId === 'other') {
       setShowCustomInput(true);
       return;
     }
-    
+    // Store the name, not the ID
+    const valueToStore = interestName || interestId;
     setSelectedInterests(prev => {
-      if (prev.includes(interestId)) {
-        return prev.filter(id => id !== interestId);
+      if (prev.includes(valueToStore)) {
+        return prev.filter(id => id !== valueToStore);
       } else if (prev.length < 12) {
-        return [...prev, interestId];
+        return [...prev, valueToStore];
       } else {
         Alert.alert('Maximum Reached', 'You can select up to 12 interests.');
         return prev;
@@ -348,18 +348,18 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
                         key={interest.id}
                         style={[
                           styles.interestChip,
-                          selectedInterests.includes(interest.id) && styles.interestChipSelected
+                          selectedInterests.includes(interest.name) && styles.interestChipSelected
                         ]}
                         onPress={() => toggleInterest(interest.id, interest.name)}
                       >
                         <Ionicons 
                           name={interest.icon as any} 
                           size={16} 
-                          color={selectedInterests.includes(interest.id) ? COLORS.white : COLORS.primary} 
+                          color={selectedInterests.includes(interest.name) ? COLORS.white : COLORS.primary} 
                         />
                         <Text style={[
                           styles.interestText,
-                          selectedInterests.includes(interest.id) && styles.interestTextSelected
+                          selectedInterests.includes(interest.name) && styles.interestTextSelected
                         ]}>
                           {interest.name}
                         </Text>
