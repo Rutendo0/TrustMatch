@@ -267,8 +267,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   }, [navigation]);
 
   const goToNext = useCallback(() => {
-    if (currentIndex < profiles.length - 1) { setCurrentIndex(prev => prev + 1); setCurrentPhotoIndex(0); }
-  }, [currentIndex, profiles.length]);
+    setCurrentPhotoIndex(0);
+    if (currentIndex < profiles.length - 1) {
+      setCurrentIndex(prev => prev + 1);
+    } else {
+      // Last profile — reload to show disliked users again
+      fetchProfiles();
+    }
+  }, [currentIndex, profiles.length, fetchProfiles]);
 
   const handleLike = useCallback(async () => {
     if (!currentProfile) return;

@@ -1,7 +1,30 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { registrationProgress } from './RegistrationProgressService';
+
+// Safe storage helper — falls back to AsyncStorage when SecureStore unavailable
+const safeStorage = {
+  async get(key: string): Promise<string | null> {
+    try {
+      if (SecureStore?.getItemAsync) return await SecureStore.getItemAsync(key);
+      return await AsyncStorage.getItem(key);
+    } catch { return await AsyncStorage.getItem(key); }
+  },
+  async set(key: string, value: string): Promise<void> {
+    try {
+      if (SecureStore?.setItemAsync) await SecureStore.setItemAsync(key, value);
+      else await AsyncStorage.setItem(key, value);
+    } catch { await AsyncStorage.setItem(key, value); }
+  },
+  async remove(key: string): Promise<void> {
+    try {
+      if (SecureStore?.deleteItemAsync) await SecureStore.deleteItemAsync(key);
+      await AsyncStorage.removeItem(key);
+    } catch { await AsyncStorage.removeItem(key); }
+  },
+};
 
 // Lightweight event emitter — React Native can't use Node's 'events' module
 type Listener = () => void;
@@ -46,7 +69,7 @@ class ApiService {
         // pull it directly from SecureStore so no request ever goes out without auth.
         if (!this.token) {
           try {
-            this.token = await SecureStore.getItemAsync('authToken');
+            this.token = await safeStorage.get('authToken');
           } catch {}
         }
         if (this.token) {
@@ -66,7 +89,7 @@ class ApiService {
         if (error.response?.status === 401 && this.token) {
           this.token = null;
           try {
-            await SecureStore.deleteItemAsync('authToken');
+            await safeStorage.remove('authToken');
             await registrationProgress.clearProgress();
           } catch {}
           authEventEmitter.emit('unauthorized');
@@ -78,33 +101,24 @@ class ApiService {
 
 async init() {
     try {
-      const storedToken = await SecureStore.getItemAsync('authToken');
+      const storedToken = await safeStorage.get('authToken');
       if (storedToken) {
-        // Check if token looks valid (basic JWT format: header.payload.signature)
         const parts = storedToken.split('.');
         if (parts.length !== 3) {
-          // Invalid JWT format - clear it
-          console.warn('[API] Invalid token format in storage, clearing...');
-          await SecureStore.deleteItemAsync('authToken');
+          await safeStorage.remove('authToken');
           this.token = null;
         } else {
-          // Try to decode the payload to check if it's expired
           try {
             const payload = JSON.parse(atob(parts[1]));
             const now = Math.floor(Date.now() / 1000);
-            
-            // If token is expired, clear it
             if (payload.exp && payload.exp < now) {
-              console.warn('[API] Token expired, clearing...');
-              await SecureStore.deleteItemAsync('authToken');
+              await safeStorage.remove('authToken');
               this.token = null;
             } else {
               this.token = storedToken;
             }
-          } catch (decodeError) {
-            // If we can't decode the token, it's invalid - clear it
-            console.warn('[API] Could not decode token, clearing...');
-            await SecureStore.deleteItemAsync('authToken');
+          } catch {
+            await safeStorage.remove('authToken');
             this.token = null;
           }
         }
@@ -116,13 +130,12 @@ async init() {
 
   async setToken(token: string) {
     this.token = token;
-    await SecureStore.setItemAsync('authToken', token);
+    await safeStorage.set('authToken', token);
   }
 
   async logout() {
     this.token = null;
-    await SecureStore.deleteItemAsync('authToken');
-    // Clear registration progress on logout
+    await safeStorage.remove('authToken');
     await registrationProgress.clearProgress();
   }
 

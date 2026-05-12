@@ -1,8 +1,23 @@
 import { io, Socket } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.replace('/api', '')
-  || 'http://192.168.1.93:3000';
+  || 'https://trustmatch-production.up.railway.app';
+
+const getToken = async (): Promise<string | null> => {
+  try {
+    if (SecureStore?.getItemAsync) return await SecureStore.getItemAsync('authToken');
+    return await AsyncStorage.getItem('authToken');
+  } catch { return await AsyncStorage.getItem('authToken'); }
+};
+
+const removeToken = async (): Promise<void> => {
+  try {
+    if (SecureStore?.deleteItemAsync) await SecureStore.deleteItemAsync('authToken');
+    await AsyncStorage.removeItem('authToken');
+  } catch {}
+};
 
 type MessageHandler = (data: { matchId: string; message: any }) => void;
 type ReadHandler    = (data: { matchId: string; userId: string }) => void;
@@ -15,7 +30,7 @@ class SocketService {
   async connect(): Promise<void> {
     if (this.socket?.connected) return;
 
-    const token = await SecureStore.getItemAsync('authToken');
+    const token = await getToken();
     if (!token) return;
 
     this.socket = io(API_URL, {
@@ -43,7 +58,7 @@ class SocketService {
         // If signature mismatch, the JWT_SECRET changed - clear the invalid token
         if (err.message === 'Invalid token: signature mismatch') {
           console.log('[Socket] Clearing invalid token due to signature mismatch');
-          await SecureStore.deleteItemAsync('authToken');
+          await removeToken();
         }
         
         // Clear the socket - the caller should handle refreshing token
