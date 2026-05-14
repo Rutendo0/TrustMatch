@@ -330,7 +330,7 @@ router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Re
       },
       include: {
         photos: { orderBy: { order: 'asc' } },
-        verification: { select: { isVerified: true } },
+        verification: { select: { isVerified: true, idVerified: true, selfieVerified: true, emailVerified: true, liveVerified: true } },
         voiceNotes: {
           where: { isActive: true },
           take: 3,
@@ -341,19 +341,42 @@ router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Re
       take: Number(limit),
     });
 
-    const response = profiles.map((p) => ({
-      id: p.id,
-      firstName: p.firstName,
-      age: calculateAge(p.dateOfBirth),
-      bio: p.bio,
-      aboutMe: p.aboutMe,
-      interests: p.interests ? JSON.parse(p.interests) : [],
-      city: p.city,
-      photos: p.photos.map((ph) => ph.url),
-      isVerified: p.verification?.isVerified || false,
-      voiceNotes: p.voiceNotes,
-      lastActive: p.lastActive,
-    }));
+    const response = profiles.map((p) => {
+      // Calculate real trust score based on verification steps completed
+      const v = p.verification;
+      let trustScore = 0;
+      if (v?.emailVerified) trustScore += 20;
+      if (v?.idVerified) trustScore += 30;
+      if (v?.selfieVerified) trustScore += 25;
+      if (v?.liveVerified) trustScore += 25;
+
+      // Calculate compatibility based on shared interests with current user
+      const profileInterests: string[] = p.interests ? JSON.parse(p.interests) : [];
+      const currentUserInterests: string[] = currentUser.interests ? JSON.parse(currentUser.interests) : [];
+      const sharedCount = profileInterests.filter(i => currentUserInterests.includes(i)).length;
+      const maxPossible = Math.max(profileInterests.length, currentUserInterests.length, 1);
+      const interestScore = Math.round((sharedCount / maxPossible) * 40); // up to 40%
+      const cityBonus = (p.city && currentUser.city && p.city.toLowerCase() === currentUser.city.toLowerCase()) ? 15 : 0;
+      const ageBonus = 20; // base compatibility
+      const verifiedBonus = v?.isVerified ? 25 : 0;
+      const compatibility = Math.min(100, ageBonus + interestScore + cityBonus + verifiedBonus);
+
+      return {
+        id: p.id,
+        firstName: p.firstName,
+        age: calculateAge(p.dateOfBirth),
+        bio: p.bio,
+        aboutMe: p.aboutMe,
+        interests: profileInterests,
+        city: p.city,
+        photos: p.photos.map((ph) => ph.url),
+        isVerified: v?.isVerified || false,
+        trustScore,
+        compatibility,
+        voiceNotes: p.voiceNotes,
+        lastActive: p.lastActive,
+      };
+    });
 
     return res.json(response);
   } catch (error) {

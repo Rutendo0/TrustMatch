@@ -242,8 +242,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           ? p.photos.map((ph: any) => typeof ph === 'string' ? ph : ph?.url).filter(Boolean)
           : ['https://via.placeholder.com/400'],
         isVerified: p?.isVerified || false,
-        trustScore: p?.trustScore || 85,
-        compatibility: p?.compatibility || p?.trustScore || Math.floor(Math.random() * 20) + 75,
+        trustScore: p?.trustScore ?? 0,
+        compatibility: p?.compatibility ?? 0,
         personalityType: 'N/A',
         interests: p?.interests || [],
         safetyFeatures: p?.isVerified ? ['Verified'] : [],

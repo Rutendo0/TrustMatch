@@ -253,16 +253,32 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         recommendations: [],
       };
 
-      console.log('Verification result:', verificationResult);
-      setVerificationResult(verificationResult);
-
-      // Step 5: Complete
-      console.log('Verification successful, moving to success screen');
-      setProcessingStep('complete');
+      // Step 5: Complete — go straight to email verification, skip success screen
+      console.log('Verification successful, navigating to email verification');
       if (verificationTimeoutRef.current) clearTimeout(verificationTimeoutRef.current);
-      setTimeout(() => {
-        setStep('success');
-      }, 1000);
+      
+      // Submit verification results to backend first
+      try {
+        await api.submitLocalVerification({
+          success: verificationResult.success,
+          trustScore: verificationResult.trustScore,
+          confidence: verificationResult.confidence,
+          ageEstimate: verificationResult.ageEstimate,
+          isLikelyBot: verificationResult.isLikelyBot,
+          isDeepfake: verificationResult.isDeepfake,
+        });
+      } catch (e) {
+        console.log('submitLocalVerification failed, continuing:', e);
+      }
+
+      // Navigate directly to email verification
+      navigation.navigate('EmailVerification', {
+        formData: {
+          ...formData,
+          verificationCompleted: true,
+          verificationResult,
+        },
+      });
 
     } catch (error) {
       if (verificationTimeoutRef.current) clearTimeout(verificationTimeoutRef.current);
@@ -469,7 +485,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
             <ActivityIndicator size="large" color={COLORS.primary} />
             <Text style={styles.processingTitle}>Verifying your identity...</Text>
             <Text style={styles.processingSubtitle}>
-              Comparing your selfie with your ID
+              Comparing your selfie with your profile photo
             </Text>
           </View>
 
