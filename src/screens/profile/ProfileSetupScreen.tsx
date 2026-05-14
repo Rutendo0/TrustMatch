@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../../services/api';
+import * as SecureStore from 'expo-secure-store';
 import {
   View,
   Text,
@@ -188,25 +189,28 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
           country,
           interests: allInterests,
         });
+      } catch (error: any) {
+        console.error('Failed to save profile:', error);
+        Alert.alert('Save Error', error?.response?.data?.error || 'Failed to save profile. Please try again.');
+        return;
+      }
 
-        // Save emergency contact to SecureStore locally
-        if (emergencyName && emergencyPhone) {
-          const { default: SecureStore } = await import('expo-secure-store');
+      // Save emergency contact locally — non-fatal if it fails
+      if (emergencyName && emergencyPhone) {
+        try {
           await SecureStore.setItemAsync('emergency_contact', JSON.stringify({
             name: emergencyName,
             phone: emergencyPhone,
-            relation: emergencyRelation,
           }));
+        } catch (e) {
+          console.warn('Could not save emergency contact:', e);
         }
-        
-        // Save discovery preferences
-        const interestedInMap: Record<string, string> = {
-          'Men': 'MALE',
-          'Women': 'FEMALE',
-        };
-        
-        // Get user's gender from formData or fetch profile
-        let userGender = formData.gender;
+      }
+
+      // Save discovery preferences
+      try {
+        // Get user's gender to determine interestedIn
+        let userGender = formData?.gender;
         if (!userGender) {
           try {
             const profile = await api.getProfile();
@@ -215,24 +219,20 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
             console.warn('Could not fetch user gender');
           }
         }
-        
-        // Default to showing opposite gender
         const interestedIn = userGender === 'FEMALE' ? 'MALE' : 'FEMALE';
-        
+
         await api.updatePreferences({
           ageRangeMin: preferredAgeMin,
           ageRangeMax: preferredAgeMax,
           interestedIn,
         });
-        
-        console.log('Profile saved successfully');
-        Alert.alert('Success', 'Your profile has been saved!');
       } catch (error: any) {
-        console.error('Failed to save profile:', error);
-        // Show user-friendly error message
-        const errorMessage = error?.response?.data?.error || 'Failed to save profile. Please try again.';
-        Alert.alert('Save Error', errorMessage);
+        console.warn('Failed to save preferences:', error?.message);
+        // Non-fatal — user can update in settings
       }
+
+      console.log('Profile saved successfully');
+      Alert.alert('Profile Saved', 'Your profile is all set!');
       
       // Complete setup - navigate to main tabs
       navigation.navigate('MainTabs', {
@@ -559,30 +559,13 @@ export const ProfileSetupScreen: React.FC<ProfileSetupScreenProps> = ({
               />
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Relationship</Text>
-              <View style={styles.relationOptions}>
-                {['Parent', 'Sibling', 'Friend', 'Partner', 'Other'].map(r => (
-                  <TouchableOpacity
-                    key={r}
-                    style={[styles.relationBtn, emergencyRelation === r && styles.relationBtnActive]}
-                    onPress={() => setEmergencyRelation(r)}
-                  >
-                    <Text style={[styles.relationText, emergencyRelation === r && styles.relationTextActive]}>
-                      {r}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
             {/* What this enables */}
             <View style={styles.safetyFeaturesList}>
-              <Text style={styles.safetyFeaturesTitle}>What this unlocks:</Text>
+              <Text style={styles.safetyFeaturesTitle}>Safety features you'll unlock:</Text>
               {[
-                { icon: 'location' as const, text: '"Share my location" — send your live location to this contact before a date' },
-                { icon: 'time' as const, text: 'Date check-in — we\'ll ask "Are you safe?" and alert them if you don\'t respond' },
-                { icon: 'warning' as const, text: 'Emergency SOS — one tap alerts them with your location' },
+                { icon: 'location' as const, text: 'Share My Location — send your live location to this contact before heading out on a date.' },
+                { icon: 'time' as const, text: 'Date Check-In — we\'ll check in with you during a date and notify your contact if you don\'t respond.' },
+                { icon: 'warning' as const, text: 'Emergency SOS — one tap sends your contact an instant alert with your current location.' },
               ].map((f, i) => (
                 <View key={i} style={styles.safetyFeatureRow}>
                   <View style={styles.safetyFeatureIcon}>

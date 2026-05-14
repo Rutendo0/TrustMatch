@@ -534,10 +534,10 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
       // Check server response first - server has more sophisticated matching logic
       if (backendResult.success) {
-        // Server validated successfully - trust the server's decision
-        setStep('success');
+        // ID document is valid, but the user is NOT fully verified until the live selfie matches.
+        // Go straight to selfie capture so we can show one final result after both steps.
         const identityFingerprint = await buildIdentityFingerprint(docData);
-        
+
         // Update user profile with real details from verification
         try {
           await api.updateProfile({
@@ -547,8 +547,8 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
         } catch (profileError) {
           console.log('Could not update profile, continuing:', profileError);
         }
-        
-        // Save progress - ID verification completed
+
+        // Save progress for selfie step
         const photoUploadData = {
           ...formData,
           firstName,
@@ -559,16 +559,19 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
           idFrontImage,
           idBackImage,
           extractedData: docData,
-          documentVerified: true,
+          // IMPORTANT: keep false until selfie verification passes.
+          documentVerified: false,
           identityFingerprint,
         };
-        await registrationProgress.saveProgress('photos', photoUploadData);
-        
-        setTimeout(() => {
-          navigation.navigate('PhotoUploadScreen', {
-            formData: photoUploadData,
-          });
-        }, 1500);
+        await registrationProgress.saveProgress('selfie', photoUploadData);
+
+        // Immediate navigation: no intermediate "ID Verified" UI.
+        navigation.navigate('SelfieVerification', {
+          formData: photoUploadData,
+          idFrontImage: idFrontImage || undefined,
+          idBackImage: idBackImage || undefined,
+          profilePhotos: [], // no profile photos yet — comparing against ID only
+        });
       } else {
         // Server rejected - show the server's error message
         const errorMessage = backendResult.errors?.join('\n') || 
@@ -632,8 +635,10 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
         return renderIdBackStep();
       case 'verifying':
         return renderVerifyingStep();
+      // Do not show a success UI before selfie verification.
+      // If a user resumes from saved state, fall back to the verifying step.
       case 'success':
-        return renderSuccessStep();
+        return renderVerifyingStep();
       default:
         return renderIdUploadStep();
     }
@@ -803,6 +808,8 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
     </View>
   );
 
+  // This screen should NOT be shown before selfie verification passes.
+  // Keeping it for any legacy resume state.
   const renderSuccessStep = () => (
     <View style={styles.verifyingContainer}>
       <Ionicons name="shield-checkmark" size={80} color={COLORS.success} />
@@ -812,6 +819,7 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       </Text>
     </View>
   );
+
 
   return (
     <SafeAreaView style={styles.container}>

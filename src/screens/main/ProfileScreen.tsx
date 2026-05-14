@@ -199,14 +199,16 @@ export const ProfileScreen: React.FC = () => {
 
   const photoSize = wp(28);
   const profileStrength = getProfileStrength();
-  // Compute trust score from verification fields since API doesn't return a raw trustScore
+  // Compute trust score using the same model as the server:
+  // email=20 (base, always), id=35, face scaled 0-35 by match %, photo=10 flat
   const computeTrustScore = () => {
-    let score = 0;
-    if (user?.verification?.emailVerified) score += 20;
-    if (user?.verification?.idVerified) score += 30;
-    if (user?.verification?.selfieVerified) score += 25;
-    if (user?.verification?.liveVerified) score += 25;
-    return score;
+    const v = user?.verification;
+    if (!v) return 20; // email base
+    const rawFace    = v.faceMatchScore ?? 0;
+    const facePoints = Math.round((rawFace / 100) * 35);
+    const idPoints   = v.idVerified    ? 35 : 0;
+    const photoPoints = v.idVerified   ? 10 : 0; // photo only counted if ID passed
+    return Math.min(100, 20 + idPoints + facePoints + photoPoints);
   };
   const trustScore = computeTrustScore();
   const photoGridSize = (wp(100) - 48 - 16) / 3;
@@ -402,9 +404,10 @@ export const ProfileScreen: React.FC = () => {
 
               <View style={styles.badgesRow}>
                 {[
-                  { label: 'ID Verified', active: user?.verification?.idVerified },
-                  { label: 'Selfie Matched', active: user?.verification?.selfieVerified },
-                  { label: 'Phone Verified', active: !!user?.phone },
+                  { label: 'Email Verified',  active: !!user?.verification?.emailVerified },
+                  { label: 'ID Verified',     active: !!user?.verification?.idVerified },
+                  { label: 'Selfie Matched',  active: !!user?.verification?.selfieVerified },
+                  { label: 'Photo Verified',  active: !!user?.verification?.idVerified },
                   ...(user?.verification?.liveVerified ? [{ label: 'Live Verified', active: true }] : []),
                 ].map((badge, i) => (
                   <View key={i} style={[styles.verificationBadgePill, badge.active && styles.verificationBadgePillActive]}>

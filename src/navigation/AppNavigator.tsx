@@ -4,6 +4,7 @@ import { NavigationContainer, useNavigation, NavigationContainerRef } from '@rea
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, authEventEmitter } from '../services/api';
 
 import { WelcomeScreen } from '../screens/auth/WelcomeScreen';
@@ -28,6 +29,7 @@ import { PersonalityQuizScreen } from '../screens/profile/PersonalityQuizScreen'
 import { DealbreakersScreen } from '../screens/profile/DealbreakersScreen';
 import { ProfileSetupScreen } from '../screens/profile/ProfileSetupScreen';
 import { EmailVerificationScreen } from '../screens/auth/EmailVerificationScreen';
+import { VerificationSuccessScreen } from '../screens/auth/VerificationSuccessScreen';
 import { WelcomeNewUserScreen } from '../screens/main/WelcomeNewUserScreen';
 import { SafetyCenterScreen } from '../screens/main/SafetyCenterScreen';
 import { COLORS, SHADOWS } from '../constants/theme';
@@ -39,9 +41,10 @@ export type RootStackParamList = {
   Register: undefined;
   ProfileDetails: { email: string; password: string; phone: string };
   IDVerification: { formData: any };
-  PhotoUploadScreen: { formData: any };
+  PhotoUploadScreen: { formData: any; verifiedSelfieUri?: string };
   SelfieVerification: { formData?: any; idFrontImage?: string; idBackImage?: string; profilePhotos?: string[] };
   EmailVerification: { formData: any };
+  VerificationSuccess: { trustScore: number; verification: any };
   ProfileSetup: { formData: any };
   MainTabs: undefined;
   Chat: { matchId: string; name: string };
@@ -199,6 +202,25 @@ const MainTabs = () => {
 
 export const AppNavigator = () => {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  const [initialRoute, setInitialRoute] = useState<keyof RootStackParamList | null>(null);
+
+  // Determine initial route: new users who haven't seen welcome go to WelcomeNewUser
+  useEffect(() => {
+    const getInitialRoute = async () => {
+      try {
+        const hasSeenWelcome = await AsyncStorage.getItem('hasSeenWelcome');
+        if (hasSeenWelcome === 'false') {
+          // Brand new user — show onboarding
+          setInitialRoute('WelcomeNewUser');
+        } else {
+          setInitialRoute('Welcome');
+        }
+      } catch {
+        setInitialRoute('Welcome');
+      }
+    };
+    getInitialRoute();
+  }, []);
 
   // Global 401 handler — redirect to Welcome when token expires
   useEffect(() => {
@@ -208,7 +230,6 @@ export const AppNavigator = () => {
           index: 0,
           routes: [{ name: 'Welcome' }],
         });
-        // Small delay so the navigation completes before showing the alert
         setTimeout(() => {
           Alert.alert(
             'Session Expired',
@@ -224,9 +245,13 @@ export const AppNavigator = () => {
     };
   }, []);
 
+  // Wait until we know the initial route
+  if (!initialRoute) return null;
+
   return (
     <NavigationContainer ref={navigationRef}>
       <Stack.Navigator
+        initialRouteName={initialRoute}
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
@@ -240,6 +265,11 @@ export const AppNavigator = () => {
         <Stack.Screen name="PhotoUploadScreen" component={PhotoUploadScreen} />
         <Stack.Screen name="SelfieVerification" component={SelfieVerificationScreen} />
         <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
+        <Stack.Screen
+          name="VerificationSuccess"
+          component={VerificationSuccessScreen}
+          options={{ animation: 'fade', gestureEnabled: false }}
+        />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen

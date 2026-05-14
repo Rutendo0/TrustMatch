@@ -5,14 +5,14 @@ import {
   StyleSheet,
   TouchableOpacity,
   Modal,
-  TextInput,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import * as SecureStore from 'expo-secure-store';
 import { Button, Card } from '../common';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+
 
 interface LocationShareProps {
   onShareStarted?: (shareId: string) => void;
@@ -32,11 +32,14 @@ export const LocationShare: React.FC<LocationShareProps> = ({
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [activeShare, setActiveShare] = useState<ActiveShare | null>(null);
-  const [contactName, setContactName] = useState('');
+  const [contactName, setContactName] = useState('Emergency contact');
   const [contactPhone, setContactPhone] = useState('');
-  const [duration, setDuration] = useState(60);
+
+
+  const duration = 120; // always 2 hours
   const [isSharing, setIsSharing] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -55,11 +58,34 @@ export const LocationShare: React.FC<LocationShareProps> = ({
     return () => clearInterval(interval);
   }, [activeShare]);
 
+  const loadEmergencyContact = async (): Promise<{ name: string; phone: string } | null> => {
+    try {
+      const raw = await SecureStore.getItemAsync('emergency_contact');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const name = String(parsed?.name ?? '').trim();
+      const phone = String(parsed?.phone ?? '').trim();
+      if (!name || !phone) return null;
+      return { name, phone };
+    } catch {
+      return null;
+    }
+  };
+
   const handleStartSharing = async () => {
-    if (!contactName.trim() || !contactPhone.trim()) {
-      Alert.alert('Error', 'Please enter contact name and phone number');
+    const emergency = await loadEmergencyContact();
+    if (!emergency) {
+      Alert.alert(
+        'Emergency contact not set',
+        'To share your location in an emergency, add an emergency contact in Settings → Safety Center.'
+      );
+      setShowModal(false);
       return;
     }
+
+    setContactName(emergency.name);
+    setContactPhone(emergency.phone);
+
 
     setIsSharing(true);
 
@@ -76,20 +102,24 @@ export const LocationShare: React.FC<LocationShareProps> = ({
 
       setActiveShare({
         id: shareId,
-        name: contactName,
-        phone: contactPhone,
+        name: emergency.name,
+        phone: emergency.phone,
         expiresAt,
       });
 
+
       Alert.alert(
         'Location Shared',
-        `Your location has been shared with ${contactName}. They will receive updates for ${duration} minutes.`
+        `Your location has been shared with ${emergency.name}. They will receive updates for 120 minutes.`
       );
+
 
       onShareStarted?.(shareId);
       setShowModal(false);
-      setContactName('');
+      setContactName('Emergency contact');
       setContactPhone('');
+
+
     } catch (error) {
       Alert.alert('Error', 'Failed to share location. Please try again.');
     } finally {
@@ -103,14 +133,8 @@ export const LocationShare: React.FC<LocationShareProps> = ({
     onShareEnded?.();
   };
 
-  const durations = [
-    { label: '30 min', value: 30 },
-    { label: '1 hour', value: 60 },
-    { label: '2 hours', value: 120 },
-    { label: '4 hours', value: 240 },
-  ];
-
   if (activeShare) {
+
     return (
       <Card style={styles.activeShareCard}>
         <View style={styles.activeShareHeader}>
@@ -165,50 +189,20 @@ export const LocationShare: React.FC<LocationShareProps> = ({
             </Text>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Contact Name</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter name"
-                value={contactName}
-                onChangeText={setContactName}
-              />
+              <Text style={styles.label}>Sharing contact</Text>
+              <Text style={styles.description}>
+                {contactName && contactPhone
+                  ? `Emergency contact: ${contactName} (${contactPhone})`
+                  : 'Using your saved emergency contact. If not set, add it in Settings → Safety Center.'}
+              </Text>
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Phone Number</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter phone number"
-                value={contactPhone}
-                onChangeText={setContactPhone}
-                keyboardType="phone-pad"
-              />
+              <Text style={styles.label}>Duration</Text>
+              <Text style={styles.description}>Always 2 hours</Text>
             </View>
 
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Share Duration</Text>
-              <View style={styles.durationOptions}>
-                {durations.map((d) => (
-                  <TouchableOpacity
-                    key={d.value}
-                    style={[
-                      styles.durationButton,
-                      duration === d.value && styles.durationButtonActive,
-                    ]}
-                    onPress={() => setDuration(d.value)}
-                  >
-                    <Text
-                      style={[
-                        styles.durationText,
-                        duration === d.value && styles.durationTextActive,
-                      ]}
-                    >
-                      {d.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
+
 
             <Button
               title={isSharing ? 'Starting...' : 'Start Sharing'}
@@ -325,28 +319,5 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     fontSize: FONTS.sizes.md,
   },
-  durationOptions: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  durationButton: {
-    flex: 1,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-  },
-  durationButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  durationText: {
-    fontSize: FONTS.sizes.sm,
-    color: COLORS.text,
-  },
-  durationTextActive: {
-    color: COLORS.white,
-    fontWeight: '600',
-  },
+
 });

@@ -11,65 +11,8 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
-import { Canvas, Image, loadImage } from 'canvas';
-import * as faceapi from 'face-api.js';
 import axios from 'axios';
-
-// Fix for face-api.js in Node.js environment
-faceapi.env.setEnv({
-  // @ts-ignore - These types have compatibility issues
-  Canvas: typeof Canvas !== 'undefined' ? Canvas : globalThis.Canvas,
-  // @ts-ignore
-  Image: typeof Image !== 'undefined' ? Image : globalThis.Image,
-  fetch: globalThis.fetch,
-  // @ts-ignore - File system operations
-  readFile: fs.readFileSync,
-});
-
-// Configure face-api.js models path
-const MODEL_PATH = path.join(process.cwd(), 'models');
-
-// Load face-api.js models from CDN or local
-let modelsLoaded = false;
-let modelsLoadError: Error | null = null;
-async function loadFaceApiModels() {
-  if (modelsLoaded) return;
-  if (modelsLoadError) {
-    console.log('Previous model load error, skipping:', modelsLoadError.message);
-    return;
-  }
-  try {
-    // Try to load from local first
-    try {
-      await faceapi.nets.tinyFaceDetector.loadFromDisk(MODEL_PATH);
-      await faceapi.nets.faceLandmark68Net.loadFromDisk(MODEL_PATH);
-      await faceapi.nets.faceRecognitionNet.loadFromDisk(MODEL_PATH);
-      modelsLoaded = true;
-      console.log('Face-api.js models loaded from local disk');
-      return;
-    } catch (localError) {
-      console.log('Local models not found, trying CDN...');
-    }
-    
-    // Fallback: Download models from justadudewhokeys CDN
-    const MODEL_URLS = {
-      tinyFaceDetector: 'https://justadudewhokeys.github.io/face-api.js/models/tiny_face_detector_model-weights_manifest.json',
-      faceLandmark68Net: 'https://justadudewhokeys.github.io/face-api.js/models/face_landmark_68_model-weights_manifest.json',
-      faceRecognitionNet: 'https://justadudewhokeys.github.io/face-api.js/models/face_recognition_model-weights_manifest.json',
-    };
-
-    await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
-    await faceapi.nets.faceLandmark68Net.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
-    await faceapi.nets.faceRecognitionNet.loadFromUri('https://justadudewhokeys.github.io/face-api.js/models');
-    
-    modelsLoaded = true;
-    console.log('Face-api.js models loaded from CDN');
-  } catch (error: any) {
-    console.error('Error loading face-api.js models:', error?.message || error);
-    modelsLoadError = error;
-    throw new Error('Failed to load face-api.js models: ' + error?.message);
-  }
-}
+import FormData from 'form-data';
 
 // ── Multer: local disk storage for ID documents (kept on-server, never sent to CDN) ─
 const idDocStorage = multer.diskStorage({
@@ -129,10 +72,17 @@ function nameSimilarity(a: string, b: string): number {
 
 // Checks if two names are similar enough to be the same person
 // Accepts exact match OR similarity >= 0.6 (handles OCR character errors)
+// Also handles OCR word-splitting: "MIKITA YO" matches "MIKITAYO"
 function namesMatch(userName: string, ocrName: string): boolean {
   if (!userName || !ocrName) return false;
-  if (ocrName.includes(userName)) return true; // exact substring
-  return nameSimilarity(userName, ocrName) >= 0.6;
+  const userLower = userName.toLowerCase();
+  const ocrLower  = ocrName.toLowerCase();
+  if (ocrLower.includes(userLower)) return true; // exact substring
+  // Handle OCR splitting a word with a space: "MIKITA YO" vs "MIKITAYO"
+  const ocrNoSpaces   = ocrLower.replace(/\s+/g, '');
+  const userNoSpaces  = userLower.replace(/\s+/g, '');
+  if (ocrNoSpaces.includes(userNoSpaces)) return true;
+  return nameSimilarity(userLower, ocrLower) >= 0.6;
 }
 
 // Document verification status enum
@@ -594,7 +544,10 @@ router.post('/submit-local', authMiddleware, async (req: AuthRequest, res: Respo
     await prisma.verification.update({
       where: { userId },
       data: {
-        isVerified: true, // Mark as verified based on AI
+        // This endpoint is used only for AI-based local verification.
+        // If you want Step A gating, do not mark idVerified until selfie check is done.
+        // SelfieVerified still represents the selfie comparison passing.
+        isVerified: true, // keep overall verified for this local AI flow
         idVerified: true,
         selfieVerified: true,
         faceMatchScore: confidence ? confidence * 100 : null,
@@ -726,7 +679,8 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
     }
 
     const extractedName = `${firstName || ''} ${lastName || ''}`.trim() || (fullName || '').trim();
-    if (!extractedName) {
+    // Only fail if we have no name AND no rawText to fall back on for matching
+    if (!extractedName && !rawText) {
       errors.push('Could not extract full name from document');
     }
 
@@ -846,15 +800,23 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
       const docFull = (fullName || '').toLowerCase().trim();
 
       // Use rawText for matching if available — more reliable than parsed fields
+      // rawText contains the full OCR output before any parsing, so names are always in it
       const allDocText = (rawText || `${docFirst} ${docLast} ${docFull}`).toLowerCase().trim();
 
-      const firstFound = regFirst ? namesMatch(regFirst, allDocText) : true;
-      const lastFound  = regLast  ? namesMatch(regLast,  allDocText) : true;
+      // Only enforce name matching if we actually have OCR text to match against
+      if (allDocText && allDocText.length > 10) {
+        const firstFound = regFirst ? namesMatch(regFirst, allDocText) : true;
+        const lastFound  = regLast  ? namesMatch(regLast,  allDocText) : true;
 
-      if (!firstFound && !lastFound && (regFirst || regLast) && allDocText) {
-        errors.push('Your name does not match the name on your ID document. Please ensure you entered your legal name during registration.');
-      } else if ((!firstFound || !lastFound) && (regFirst || regLast) && allDocText) {
-        warnings.push('Only part of your name could be confirmed on the document');
+        if (!firstFound && !lastFound && (regFirst || regLast)) {
+          errors.push('Your name does not match the name on your ID document. Please ensure you entered your legal name during registration.');
+        } else if ((!firstFound || !lastFound) && (regFirst || regLast)) {
+          warnings.push('Only part of your name could be confirmed on the document');
+        }
+      } else {
+        // No OCR text available — skip name matching, log a warning
+        console.log('No OCR text available for name matching, skipping name check');
+        warnings.push('Name could not be verified from document text');
       }
 
       // Date comparison with tolerance for formatting differences
@@ -933,18 +895,19 @@ router.post('/document/verify-local', verificationLimiter, async (req: AuthReque
           console.log('Updated user info with verified data:', { email, ...updateData });
         }
         
+        // Mark idVerified: true so the selfie upload step can proceed.
+        // The overall isVerified flag stays false until selfie + email are also done.
         await prisma.verification.upsert({
           where: { userId: actualUserId },
           create: {
             userId: actualUserId,
-            idVerified: true,
             idDocumentType: documentType as any,
+            idVerified: true,
             verifiedAt: new Date(),
           },
           update: {
-            idVerified: true,
             idDocumentType: documentType as any,
-            verifiedAt: new Date(),
+            idVerified: true,
           },
         });
       } else {
@@ -1056,154 +1019,235 @@ router.get('/document/status', authMiddleware, async (req: AuthRequest, res: Res
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/verification/face-compare
-// Compare two face images using face-api.js on the server
-// Free solution - no external API needed
+// Proxy to the DeepFace Railway service — same backend used for selfie-vs-ID.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/face-compare', async (req: AuthRequest, res: Response) => {
-  let errorDetails = '';
   try {
     const { image1, image2 } = req.body;
-    console.log('Face compare request received');
-    console.log('Image1:', image1?.substring(0, 50), image1?.length);
-    console.log('Image2:', image2?.substring(0, 50), image2?.length);
 
     if (!image1 || !image2) {
-      return res.status(400).json({ 
-        error: 'Two images are required for comparison',
-        details: 'Please provide both image1 and image2 URLs or base64 data'
-      });
+      return res.status(400).json({ error: 'Two images are required for comparison' });
     }
 
-    // Load models if not already loaded
-    console.log('Loading face-api models...');
-    await loadFaceApiModels();
-    console.log('Models loaded, proceeding with comparison');
-
-    // Load images from URLs or base64 - use canvas for Node.js
-    let img1: Canvas;
-    let img2: Canvas;
-
-    try {
-      // Helper to load image into canvas using sharp for better compatibility
-      const loadImageToCanvas = async (source: string): Promise<Canvas> => {
-        let imageBuffer: Buffer;
-        
-        if (source.startsWith('data:image')) {
-          // Base64 - extract the data part
-          const base64Data = source.replace(/^data:image\/\w+;base64,/, '');
-          imageBuffer = Buffer.from(base64Data, 'base64');
-        } else if (source.startsWith('http')) {
-          // Fetch from URL
-          const axios = require('axios');
-          const response = await axios.get(source, { 
-            responseType: 'arraybuffer',
-            timeout: 10000,
-            maxContentLength: 10 * 1024 * 1024 // 10MB limit
-          });
-          imageBuffer = Buffer.from(response.data);
-        } else if (source.startsWith('file://') || source.startsWith('/')) {
-          // Local file path - handle file:// URIs or direct paths
-          const filePath = source.replace(/^file:\/\//, '');
-          if (fs.existsSync(filePath)) {
-            imageBuffer = fs.readFileSync(filePath);
-          } else {
-            throw new Error(`File not found: ${filePath}`);
-          }
-        } else {
-          throw new Error(`Unsupported image source: ${source.substring(0, 50)}`);
-        }
-        
-        // Use sharp to get image metadata and create canvas
-        const metadata = await sharp(imageBuffer).metadata();
-        const canvas = new Canvas(metadata.width, metadata.height);
-        const ctx = canvas.getContext('2d');
-        
-        // Load image using canvas's loadImage
-        const img = await loadImage(imageBuffer);
-        ctx.drawImage(img, 0, 0);
-        return canvas;
-      };
-
-      img1 = await loadImageToCanvas(image1);
-      img2 = await loadImageToCanvas(image2);
-    } catch (imgError: any) {
-      console.error('Error loading images:', imgError);
-      return res.status(400).json({ 
-        error: 'Failed to load images',
-        details: imgError.message
-      });
+    const deepfaceUrl = process.env.FACE_VERIFICATION_API_URL;
+    if (!deepfaceUrl) {
+      return res.status(503).json({ error: 'Face verification service not configured. Set FACE_VERIFICATION_API_URL.' });
     }
 
-    // Detect faces and get descriptors
-    console.log('Creating face detector...');
-    const detector = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 416,
-      scoreThreshold: 0.5
+    // Helper: fetch a URL or decode base64 into a Buffer
+    const toBuffer = async (source: string): Promise<Buffer> => {
+      if (source.startsWith('data:image')) {
+        return Buffer.from(source.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+      }
+      if (source.startsWith('http')) {
+        const resp = await axios.get(source, { responseType: 'arraybuffer', timeout: 15000 });
+        return Buffer.from(resp.data);
+      }
+      if (source.startsWith('/') || source.startsWith('file://')) {
+        return fs.readFileSync(source.replace(/^file:\/\//, ''));
+      }
+      throw new Error(`Unsupported image source: ${source.substring(0, 60)}`);
+    };
+
+    const [buf1, buf2] = await Promise.all([toBuffer(image1), toBuffer(image2)]);
+
+    const form = new FormData();
+    form.append('img1', buf1, { filename: 'img1.jpg', contentType: 'image/jpeg' });
+    form.append('img2', buf2, { filename: 'img2.jpg', contentType: 'image/jpeg' });
+
+    const dfResp = await axios.post(deepfaceUrl, form, {
+      headers: form.getHeaders(),
+      timeout: 60000,
     });
-    console.log('Detector created, detecting faces...');
 
-    let detection1: any;
-    let detection2: any;
-    try {
-      detection1 = await faceapi.detectSingleFace(img1, detector)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-      console.log('Face 1 detected:', !!detection1);
-      detection2 = await faceapi.detectSingleFace(img2, detector)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-      console.log('Face 2 detected:', !!detection2);
-    } catch (faceError: any) {
-      console.error('Face detection error:', faceError);
-      return res.status(500).json({
-        error: 'Face detection failed',
-        details: faceError.message
-      });
-    }
+    const data = dfResp.data;
+    const isMatch: boolean = data.verified === true;
+    const similarity: number = data.distance != null
+      ? Math.max(0, Math.min(1, 1 - data.distance))
+      : (data.confidence != null ? data.confidence / 100 : 0);
 
-    if (!detection1 || !detection2) {
-      return res.json({
-        success: false,
-        similarity: 0,
-        isMatch: false,
-        error: !detection1 ? 'No face detected in first image' : 'No face detected in second image',
-        message: 'Could not detect a face in one or both images. Please use clearer photos.',
-      });
-    }
-
-    // Calculate face matching score using Euclidean distance
-    const distance = faceapi.euclideanDistance(
-      detection1.descriptor,
-      detection2.descriptor
-    );
-
-    // Convert distance to similarity (0 = identical, 1 = completely different)
-    // Typical threshold: 0.6 for tight match, 0.4 for very strict
-    const similarity = 1 - distance;
-    const threshold = 0.5; // 50% similarity threshold
-    const isMatch = similarity >= threshold;
-
-    console.log(`Face comparison: distance=${distance.toFixed(4)}, similarity=${(similarity * 100).toFixed(1)}%, match=${isMatch}`);
+    console.log(`[face-compare] similarity=${(similarity * 100).toFixed(1)}% match=${isMatch}`);
 
     return res.json({
       success: true,
-      similarity: Math.max(0, Math.min(1, similarity)),
+      similarity,
       isMatch,
-      distance: distance,
-      threshold,
-      message: isMatch 
+      threshold: data.threshold || 0.68,
+      message: isMatch
         ? `Faces match! (${(similarity * 100).toFixed(0)}% similarity)`
-        : `Faces do not match (${(similarity * 100).toFixed(0)}% similarity). Threshold: ${(threshold * 100).toFixed(0)}%`,
+        : `Faces do not match (${(similarity * 100).toFixed(0)}% similarity)`,
+    });
+  } catch (error: any) {
+    console.error('Face comparison error:', error?.message);
+    return res.status(500).json({ error: 'Face comparison failed', details: error?.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/verification/selfie
+// Upload the verified selfie to Cloudinary and store the URL as the face anchor.
+// Called after selfie vs ID comparison passes.
+// ─────────────────────────────────────────────────────────────────────────────
+const selfieStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = path.join(process.cwd(), 'uploads/selfies');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || '.jpg';
+    cb(null, `selfie-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  },
+});
+const uploadSelfieFile = multer({
+  storage: selfieStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image files are allowed'));
+  },
+}).single('selfie');
+
+router.post('/selfie', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    // Check user has completed ID verification first
+    const verification = await prisma.verification.findUnique({ where: { userId } });
+    if (!verification?.idVerified) {
+      return res.status(403).json({ error: 'Please complete ID verification before uploading a selfie.' });
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      uploadSelfieFile(req as any, res as any, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
 
-  } catch (error: any) {
-    console.error('Face comparison error:', error);
-    console.error('Stack:', error?.stack);
-    return res.status(500).json({ 
-      error: 'Face comparison failed',
-      details: error?.message || String(error),
-      stack: error?.stack?.substring(0, 500)
+    if (!req.file) {
+      return res.status(400).json({ error: 'No selfie image provided' });
+    }
+
+    const relPath = `/uploads/selfies/${req.file.filename}`;
+
+    // Try to upload to Cloudinary for a persistent URL
+    let selfieUrl = relPath;
+    try {
+      const { cloudinary: cld } = await import('../lib/cloudinary');
+      const result = await cld.uploader.upload(req.file.path, {
+        folder: 'trustmatch/selfies',
+        transformation: [{ width: 800, height: 800, crop: 'limit', quality: 'auto:good' }],
+      });
+      selfieUrl = result.secure_url;
+      // Clean up local file after Cloudinary upload
+      try { fs.unlinkSync(req.file.path); } catch {}
+    } catch (cloudErr) {
+      console.warn('Cloudinary selfie upload failed, using local path:', cloudErr);
+    }
+
+    await prisma.verification.update({
+      where: { userId },
+      data: {
+        selfieUrl,
+        verifiedSelfieUrl: selfieUrl,
+        selfieVerified: true,
+        // Step A: set idVerified only after selfie passes
+        idVerified: true,
+        faceMatchScore: req.body.faceMatchScore ? parseFloat(req.body.faceMatchScore) : null,
+      },
     });
+
+    return res.json({ success: true, selfieUrl });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Selfie upload error:', error);
+    return res.status(500).json({ error: 'Failed to upload selfie' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/verification/compare-photo-to-selfie
+// Compare a newly uploaded profile photo against the user's verified selfie
+// using the DeepFace Railway service — same backend used for selfie-vs-ID.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/compare-photo-to-selfie', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { photoUrl } = req.body;
+
+    if (!photoUrl) {
+      return res.status(400).json({ error: 'photoUrl is required' });
+    }
+
+    const deepfaceUrl = process.env.FACE_VERIFICATION_API_URL;
+    if (!deepfaceUrl) {
+      return res.status(503).json({ error: 'Face verification service not configured. Set FACE_VERIFICATION_API_URL.' });
+    }
+
+    // Get the verified selfie URL
+    const verification = await prisma.verification.findUnique({ where: { userId } });
+    if (!verification?.verifiedSelfieUrl) {
+      return res.status(403).json({ error: 'No verified selfie found. Please complete selfie verification first.' });
+    }
+    if (!verification.selfieVerified) {
+      return res.status(403).json({ error: 'Selfie verification not completed. Please complete selfie verification first.' });
+    }
+
+    const selfieUrl = verification.verifiedSelfieUrl;
+
+    // Download both images as buffers
+    const fetchBuffer = async (url: string): Promise<Buffer> => {
+      const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
+      return Buffer.from(resp.data);
+    };
+
+    const [selfieBuffer, photoBuffer] = await Promise.all([
+      fetchBuffer(selfieUrl),
+      fetchBuffer(photoUrl),
+    ]);
+
+    // POST to DeepFace Railway service
+    const form = new FormData();
+    form.append('img1', selfieBuffer, { filename: 'selfie.jpg', contentType: 'image/jpeg' });
+    form.append('img2', photoBuffer, { filename: 'photo.jpg', contentType: 'image/jpeg' });
+
+    const dfResp = await axios.post(deepfaceUrl, form, {
+      headers: form.getHeaders(),
+      timeout: 60000,
+    });
+
+    const data = dfResp.data;
+    const isMatch: boolean = data.verified === true;
+    const similarity: number = data.distance != null
+      ? Math.max(0, Math.min(1, 1 - data.distance))
+      : (data.confidence != null ? data.confidence / 100 : 0);
+
+    console.log(`[photo-vs-selfie] userId=${userId} similarity=${(similarity * 100).toFixed(1)}% match=${isMatch}`);
+
+    if (!isMatch) {
+      // Do NOT ban on a single mismatch — the user may have uploaded a bad photo.
+      // Just return isMatch: false so the client can prompt them to re-upload.
+      // Only log for monitoring; no account action taken here.
+      console.warn(`[photo-vs-selfie] User ${userId} — profile photo did not match selfie. Similarity: ${(similarity * 100).toFixed(0)}%`);
+      return res.status(200).json({
+        isMatch: false,
+        similarity,
+        locked: false,
+        reason: 'Your profile photo does not clearly show your face or does not match your selfie. Please upload a clear, well-lit photo where your face is fully visible.',
+      });
+    }
+
+    return res.json({
+      isMatch: true,
+      similarity,
+      message: `Photo verified — ${(similarity * 100).toFixed(0)}% match with your selfie.`,
+    });
+  } catch (error: any) {
+    console.error('Photo-vs-selfie comparison error:', error?.message);
+    return res.status(500).json({ error: 'Face comparison failed', details: error?.message });
   }
 });
 

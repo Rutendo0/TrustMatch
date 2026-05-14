@@ -132,9 +132,10 @@ export const TrustScoreBadge: React.FC<TrustScoreBadgeProps> = ({
                 label="Phone Verified"
                 verified={trustScore.factors.phoneVerified}
               />
+              {/* Email is treated as verified-by-default for trust scoring */}
               <FactorItem
                 label="Email Verified"
-                verified={trustScore.factors.emailVerified}
+                verified={true}
               />
 
               <View style={styles.divider} />

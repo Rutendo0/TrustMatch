@@ -176,13 +176,59 @@ const VerificationModal: React.FC<{
   onClose: () => void;
   verification: any;
 }> = ({ visible, onClose, verification }) => {
+  // Compute TrustScore using the same model as the server:
+  // email=20 (base), id=35, face scaled to 35, photo=10
+  const rawFace   = verification?.faceMatchScore ?? 0;
+  const facePoints = Math.round((rawFace / 100) * 35);
+  const idPoints   = verification?.idVerified     ? 35 : 0;
+  const photoPoints = 10; // flat — main photo verified
+  const trustScore  = 20 + idPoints + facePoints + photoPoints;
+
+  const scoreColor =
+    trustScore >= 80 ? COLORS.success :
+    trustScore >= 60 ? '#F59E0B' :
+    COLORS.error;
+
   const checks = [
-    { label: 'ID Document', done: verification?.idVerified },
-    { label: 'Selfie Match', done: verification?.selfieVerified },
-    { label: 'Email', done: verification?.emailVerified },
-    { label: 'Phone', done: verification?.phoneVerified },
-    { label: 'Live Verified', done: verification?.liveVerified },
+    {
+      label: 'Email Verified',
+      sublabel: 'Email address confirmed',
+      icon: 'mail-outline' as const,
+      done: true, // always true — required to reach this point
+      pts: 20,
+    },
+    {
+      label: 'Identity Document',
+      sublabel: verification?.idDocumentType
+        ? verification.idDocumentType.replace('_', ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+        : 'ID document',
+      icon: 'card-outline' as const,
+      done: !!verification?.idVerified,
+      pts: 35,
+    },
+    {
+      label: 'Face Verification',
+      sublabel: rawFace > 0 ? `${Math.round(rawFace)}% selfie match` : 'Selfie vs ID',
+      icon: 'person-circle-outline' as const,
+      done: !!verification?.selfieVerified,
+      pts: facePoints,
+    },
+    {
+      label: 'Profile Photo',
+      sublabel: 'Main photo verified',
+      icon: 'images-outline' as const,
+      done: !!verification?.idVerified, // photo check only passes if ID passed
+      pts: photoPoints,
+    },
+    {
+      label: 'Live Verified',
+      sublabel: 'Periodic liveness check',
+      icon: 'videocam-outline' as const,
+      done: !!verification?.liveVerified,
+      pts: null, // bonus, not in base score
+    },
   ];
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={modal.overlay}>
@@ -193,20 +239,67 @@ const VerificationModal: React.FC<{
               <Ionicons name="close" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
-          <View style={{ gap: SPACING.md, paddingTop: SPACING.sm }}>
+
+          {/* TrustScore summary */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+            backgroundColor: scoreColor + '12', borderRadius: BORDER_RADIUS.lg,
+            padding: SPACING.md, marginBottom: SPACING.lg,
+          }}>
+            <View style={{
+              width: 56, height: 56, borderRadius: 28,
+              borderWidth: 3, borderColor: scoreColor,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: COLORS.white,
+            }}>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: scoreColor }}>{trustScore}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: FONTS.sizes.md, fontWeight: '700', color: COLORS.text }}>
+                TrustScore
+              </Text>
+              <Text style={{ fontSize: FONTS.sizes.sm, color: COLORS.textSecondary, marginTop: 2 }}>
+                {trustScore >= 80 ? 'Excellent — fully verified' :
+                 trustScore >= 60 ? 'Good — most checks passed' :
+                 'Fair — complete more steps'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Check rows */}
+          <View style={{ gap: SPACING.sm }}>
             {checks.map(c => (
-              <View key={c.label} style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.md }}>
-                <Ionicons
-                  name={c.done ? 'checkmark-circle' : 'ellipse-outline'}
-                  size={24}
-                  color={c.done ? COLORS.success : COLORS.textLight}
-                />
-                <Text style={{ fontSize: FONTS.sizes.md, color: c.done ? COLORS.text : COLORS.textSecondary }}>
-                  {c.label}
-                </Text>
-                <Text style={{ marginLeft: 'auto', fontSize: FONTS.sizes.sm, fontWeight: '600',
-                  color: c.done ? COLORS.success : COLORS.textSecondary }}>
-                  {c.done ? 'Verified' : 'Pending'}
+              <View key={c.label} style={{
+                flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+                backgroundColor: COLORS.background, borderRadius: BORDER_RADIUS.md,
+                padding: SPACING.sm,
+              }}>
+                <View style={{
+                  width: 36, height: 36, borderRadius: 18,
+                  backgroundColor: c.done ? COLORS.success + '20' : COLORS.border + '60',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Ionicons
+                    name={c.done ? c.icon : 'ellipse-outline'}
+                    size={18}
+                    color={c.done ? COLORS.success : COLORS.textLight}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: FONTS.sizes.sm, fontWeight: '600', color: c.done ? COLORS.text : COLORS.textSecondary }}>
+                    {c.label}
+                  </Text>
+                  <Text style={{ fontSize: FONTS.sizes.xs, color: COLORS.textLight, marginTop: 1 }}>
+                    {c.sublabel}
+                  </Text>
+                </View>
+                <Text style={{
+                  fontSize: FONTS.sizes.sm, fontWeight: '700',
+                  color: c.done ? COLORS.success : COLORS.textLight,
+                }}>
+                  {c.done
+                    ? (c.pts !== null ? `+${c.pts}` : '✓')
+                    : (c.pts !== null ? `+0/${c.pts}` : 'Pending')}
                 </Text>
               </View>
             ))}
@@ -272,8 +365,9 @@ const ReportModal: React.FC<{
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
-  const { isDark, toggleTheme, colors } = useTheme();
+  const { colors } = useTheme();
   const C = colors; // shorthand
+
   const [prefs, setPrefs] = useState<UserPrefs>(DEFAULT_PREFS);
   const [verification, setVerification] = useState<any>(null);
 
@@ -444,19 +538,7 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         },
       ],
     },
-    {
-      title: 'Appearance',
-      items: [
-        {
-          icon: 'moon-outline' as const,
-          title: 'Dark Mode',
-          subtitle: isDark ? 'Currently dark' : 'Currently light',
-          type: 'toggle' as const,
-          value: isDark,
-          onToggle: toggleTheme,
-        },
-      ],
-    },
+
     {
       title: 'Support',
       items: [

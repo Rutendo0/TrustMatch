@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../../services/api';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 
@@ -178,11 +179,15 @@ export const WelcomeNewUserScreen: React.FC<Props> = ({ navigation }) => {
     if (currentStep < STEPS.length - 1) {
       setCurrentStep(s => s + 1);
     } else {
+      AsyncStorage.setItem('hasSeenWelcome', 'true');
       navigation.replace('MainTabs');
     }
   };
 
-  const handleSkip = () => navigation.replace('MainTabs');
+  const handleSkip = () => {
+    AsyncStorage.setItem('hasSeenWelcome', 'true');
+    navigation.replace('MainTabs');
+  };
 
   const step = STEPS[currentStep];
   const isLast = currentStep === STEPS.length - 1;
@@ -296,6 +301,7 @@ export const WelcomeNewUserScreen: React.FC<Props> = ({ navigation }) => {
               <TouchableOpacity
                 style={styles.profileBtn}
                 onPress={() => {
+                  AsyncStorage.setItem('hasSeenWelcome', 'true');
                   navigation.replace('MainTabs');
                   // Small delay so MainTabs mounts before navigating to Profile
                   setTimeout(() => navigation.navigate('Profile'), 300);

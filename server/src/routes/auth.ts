@@ -448,9 +448,13 @@ router.post(
 
       const v = user.verification;
       if (!v) return res.status(400).json({ error: 'No verification record' });
+      // Email verification is still required for registration completion,
+      // but it should NOT affect trust score calculations.
       if (!v.idVerified || !v.selfieVerified || !v.emailVerified) {
         return res.status(400).json({ error: 'Complete all verification steps: ID, selfie, email' });
       }
+
+
 
       await prisma.$transaction([
         prisma.user.update({
@@ -463,6 +467,31 @@ router.post(
         })
       ]);
 
+      // ── Calculate TrustScore ──────────────────────────────────────────────
+      // Email is the base (20 pts) — every user who reaches /complete has it.
+      // Everything else adds on top of that 20.
+      //   ID verified:        up to 35 pts (flat — doc was checked)
+      //   Face/selfie match:  up to 35 pts (scaled by actual match % from selfie-vs-ID)
+      //   Profile photo:      10 pts flat — only the main photo is face-checked
+      // Max total = 20 + 35 + 35 + 10 = 100
+
+      const photoCount = await prisma.photo.count({ where: { userId } });
+
+      // Face match score stored as 0-100 in DB (set when selfie was uploaded)
+      // Scale it to 0-35 pts
+      const rawFaceScore = v.faceMatchScore ?? 0;           // 0-100
+      const facePoints   = Math.round((rawFaceScore / 100) * 35);
+
+      const idPoints     = v.idVerified ? 35 : 0;
+      const emailPoints  = 20;                              // always 20 — base for all users
+      // Profile photo: flat 10 pts if they uploaded at least one photo (only main is verified)
+      const photoPoints  = photoCount > 0 ? 10 : 0;
+
+      const trustScore   = emailPoints + idPoints + facePoints + photoPoints;
+
+      // Round face score for display
+      const faceMatchPct = rawFaceScore > 0 ? Math.round(rawFaceScore) : null;
+
       const token = generateAccessToken(userId);
       const refreshToken = await createRefreshToken(userId);
 
@@ -471,6 +500,23 @@ router.post(
         message: 'Account fully activated and verified',
         token,
         refreshToken,
+        trustScore,
+        verification: {
+          idVerified:     v.idVerified,
+          selfieVerified: v.selfieVerified,
+          emailVerified:  v.emailVerified,
+          faceMatchScore: faceMatchPct,
+          idDocumentType: v.idDocumentType,
+          verifiedAt:     new Date(),
+          // Score breakdown so the frontend can show per-item pts
+          breakdown: {
+            email:  emailPoints,
+            id:     idPoints,
+            face:   facePoints,
+            photos: photoPoints,
+          },
+          photoCount,
+        },
       });
     } catch (error) {
       console.error('Complete registration error:', error);

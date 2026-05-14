@@ -7,6 +7,7 @@ import {
   Image,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -29,30 +30,32 @@ type PhotoUploadScreenProps = {
 interface Photo {
   uri: string;
   id: string;
-  uploaded?: boolean; // true = already on server, skip re-upload
+  uploaded?: boolean;
+  cloudUrl?: string; // Cloudinary URL after upload
 }
 
 export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
   navigation,
   route,
 }) => {
-  const { formData } = route.params as { formData?: any };
+  const { formData, verifiedSelfieUri } = route.params as { formData?: any; verifiedSelfieUri?: string };
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [verifyingPhotoIndex, setVerifyingPhotoIndex] = useState<number | null>(null);
   const deviceFingerprint = useDeviceFingerprint();
 
   // Load saved progress on mount — prefer server photos to avoid re-uploads
   useEffect(() => {
     const loadProgress = async () => {
       try {
-        // First check if user already has photos on the server
         const serverPhotos = await api.getPhotos();
         if (serverPhotos && serverPhotos.length > 0) {
           setPhotos(serverPhotos.map((p: any) => ({
             uri: p.url,
             id: p.id,
-            uploaded: true, // already on server — don't re-upload
+            uploaded: true,
+            cloudUrl: p.url,
           })));
           return;
         }
@@ -60,10 +63,9 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
         // Not logged in yet or no photos — fall through to local progress
       }
 
-      // Fall back to locally saved progress (new registration, not yet uploaded)
       const progress = await registrationProgress.getProgress();
-      if (progress?.formData?.photos?.length > 0) {
-        setPhotos(progress.formData.photos.map((uri: string, index: number) => ({
+      if (progress?.formData?.photos && progress.formData.photos.length > 0) {
+        setPhotos((progress.formData.photos as string[]).map((uri: string, index: number) => ({
           uri,
           id: `restored_${index}`,
           uploaded: false,
@@ -78,7 +80,6 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       Alert.alert('Photos Required', 'Please add at least one photo to continue.');
       return;
     }
-
     if (photos.length < 3) {
       Alert.alert('Minimum Photos Required', 'Please upload at least 3 photos to continue.');
       return;
@@ -100,43 +101,94 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       // Upload photos and collect Cloudinary URLs
       const cloudinaryUrls: string[] = [];
       const newPhotos = photos.filter(p => !p.uploaded);
-      for (const photo of newPhotos) {
+
+      for (let i = 0; i < newPhotos.length; i++) {
+        const photo = newPhotos[i];
         try {
           const result = await api.uploadProfilePhoto(photo.uri);
-          console.log('Upload result:', JSON.stringify(result));
-          // result contains the uploaded photo with Cloudinary URL
           const cloudUrl = result?.url || result?.photo?.url || photo.uri;
-          console.log('Using URL for face comparison:', cloudUrl);
           cloudinaryUrls.push(cloudUrl);
+
+          // ── Face check: only compare the FIRST (main/profile) photo ─────────
+          // Additional photos are not face-checked — only the main photo matters.
+          const isMainPhoto = i === 0;
+          const selfieUri = verifiedSelfieUri || formData?.verifiedSelfieUri;
+          if (isMainPhoto && (selfieUri || formData?.selfieVerified)) {
+            setVerifyingPhotoIndex(i);
+            try {
+              const checkResult = await api.comparePhotoToSelfie(cloudUrl);
+              if (checkResult.locked) {
+                Alert.alert(
+                  'Photo not verified',
+                  'Your profile photo did not match your verified selfie. Please upload a clear photo that shows your face.'
+                );
+                return;
+              }
+              if (!checkResult.isMatch) {
+                const similarityPct = Math.round((checkResult.similarity ?? 0) * 100);
+                Alert.alert(
+                  'Profile photo does not match your selfie',
+                  `Your profile photo (${similarityPct}% match) does not match your verified selfie. Please upload a clear, well-lit photo where your face is fully visible.`
+                );
+                return;
+              }
+            } catch (checkErr: any) {
+              console.warn('[PhotoUpload] face check error:', checkErr?.message);
+              setVerifyingPhotoIndex(null);
+              const serverMsg =
+                checkErr?.response?.data?.details ||
+                checkErr?.response?.data?.error ||
+                checkErr?.message ||
+                'Verification service unavailable.';
+              Alert.alert(
+                'Photo Verification Failed',
+                `We could not verify your profile photo against your selfie. Please upload a clear, well-lit photo where your face is fully visible.\n\nDetails: ${serverMsg}`
+              );
+              return;
+            }
+            setVerifyingPhotoIndex(null);
+          }
         } catch (uploadError: any) {
           console.error('Photo upload error:', uploadError?.response?.data || uploadError?.message);
-          cloudinaryUrls.push(photo.uri); // fallback to local URI
+          // Stop flow: upload failure means we should not proceed to email verification
+          Alert.alert('Upload failed', 'Could not upload one of your photos. Please try again.');
+          return;
         }
       }
 
-      // Use Cloudinary URLs for face comparison (DeepFace needs accessible URLs)
-      const photoUrlsForVerification = cloudinaryUrls.length > 0 
-        ? cloudinaryUrls 
-        : photos.map(p => p.uri);
 
-      navigation.navigate('SelfieVerification', {
-        formData: { ...formData, photos: photoUrlsForVerification },
-        idFrontImage: formData?.idFrontImage,
-        idBackImage: formData?.idBackImage,
-        profilePhotos: photoUrlsForVerification,
+      setVerifyingPhotoIndex(null);
+
+      // Collect already-uploaded photo URLs too
+      const alreadyUploadedUrls = photos
+        .filter(p => p.uploaded && p.cloudUrl)
+        .map(p => p.cloudUrl!);
+
+      const allPhotoUrls = [...alreadyUploadedUrls, ...cloudinaryUrls];
+
+      navigation.navigate('EmailVerification', {
+        formData: {
+          ...formData,
+          photos: allPhotoUrls,
+          photosVerified: true,
+        },
       });
     } catch (error: any) {
       console.error('Photo upload error:', error?.response?.data || error);
-      const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error?.message || 'Failed to upload photos. Please try again.';
+      const errorMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        'Failed to upload photos. Please try again.';
       Alert.alert('Upload Error', errorMessage);
     } finally {
       setIsRegistering(false);
+      setVerifyingPhotoIndex(null);
     }
   };
 
   const selectImage = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
     if (permissionResult.granted === false) {
       Alert.alert('Permission Required', 'Permission to access camera roll is required!');
       return;
@@ -151,23 +203,21 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
 
     if (!result.canceled) {
       try {
-        // Compress image to max 1MB before adding to state
         const compressedImage = await ImageManipulator.manipulateAsync(
           result.assets[0].uri,
-          [{ resize: { width: 1080 } }], // resize to 1080px width, maintain aspect ratio
+          [{ resize: { width: 1080 } }],
           { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
         );
 
         const newPhoto: Photo = {
           uri: compressedImage.uri,
           id: Date.now().toString(),
-          uploaded: false, // new — needs uploading
+          uploaded: false,
         };
-        
+
         if (photos.length < 6) {
           const newPhotos = [...photos, newPhoto];
           setPhotos(newPhotos);
-          // Save progress
           await registrationProgress.saveProgress('photos', {
             ...formData,
             photos: newPhotos.map(p => p.uri),
@@ -189,15 +239,17 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
   const renderPhotoSlot = () => {
     const slots: React.ReactNode[] = [];
 
-    // Render existing photos
     photos.forEach((photo, index) => {
+      const isBeingVerified = verifyingPhotoIndex === index;
       slots.push(
         <View key={photo.id} style={styles.photoContainer}>
           <Image source={{ uri: photo.uri }} style={styles.photo} />
-          <TouchableOpacity
-            style={styles.removeButton}
-            onPress={() => removePhoto(photo.id)}
-          >
+          {isBeingVerified && (
+            <View style={styles.verifyingOverlay}>
+              <ActivityIndicator size="small" color={COLORS.white} />
+            </View>
+          )}
+          <TouchableOpacity style={styles.removeButton} onPress={() => removePhoto(photo.id)}>
             <Ionicons name="close" size={16} color={COLORS.white} />
           </TouchableOpacity>
           {index === 0 && (
@@ -209,15 +261,10 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
       );
     });
 
-    // Render empty slots to fill up to 6
     const remainingSlots = 6 - photos.length;
     for (let i = 0; i < remainingSlots; i++) {
       slots.push(
-        <TouchableOpacity
-          key={`empty-${i}`}
-          style={styles.emptySlot}
-          onPress={selectImage}
-        >
+        <TouchableOpacity key={`empty-${i}`} style={styles.emptySlot} onPress={selectImage}>
           <Ionicons name="camera" size={32} color={COLORS.textLight} />
           <Text style={styles.emptySlotText}>
             {photos.length === 0 ? 'Add Photo' : 'Add Another'}
@@ -232,10 +279,7 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Add Your Photos</Text>
@@ -246,58 +290,47 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
         <View style={styles.titleSection}>
           <Text style={styles.title}>Show Your Best Self</Text>
           <Text style={styles.subtitle}>
-            Upload 3-6 photos that represent you. Your first photo will be your main profile picture.
+            Upload 3–6 photos. Main photo is automatically verified to match your identity.
           </Text>
 
-          {/* Important note about first photo */}
-          <View style={styles.importantNote}>
-            <Ionicons name="information-circle" size={20} color={COLORS.primary} />
-            <Text style={styles.importantNoteText}>
-              <Text style={styles.importantNoteLabel}>Important: </Text>
-              The first photo you add will be used as your profile picture — make sure it's a clear, well-lit photo of your face.
+          {/* Security notice */}
+          <View style={styles.securityNote}>
+            <Ionicons name="shield-checkmark" size={20} color={COLORS.primary} />
+            <Text style={styles.securityNoteText}>
+              <Text style={styles.securityNoteLabel}>Security check: </Text>
+              Your profile photo is compared against your verified selfie to prevent impersonation.
             </Text>
           </View>
         </View>
 
-        <View style={styles.photoGrid}>
-          {renderPhotoSlot()}
-        </View>
+        <View style={styles.photoGrid}>{renderPhotoSlot()}</View>
 
         <View style={styles.tipsSection}>
           <Text style={styles.tipsTitle}>Photo Tips:</Text>
-          <View style={styles.tipItem}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-            <Text style={styles.tipText}>Use clear, well-lit photos</Text>
-          </View>
-          <View style={styles.tipItem}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-            <Text style={styles.tipText}>Show your face clearly in at least one photo</Text>
-          </View>
-          <View style={styles.tipItem}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-            <Text style={styles.tipText}>Include full body photos</Text>
-          </View>
-          <View style={styles.tipItem}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-            <Text style={styles.tipText}>Avoid group photos</Text>
-          </View>
+          {[
+            'Use clear, well-lit photos',
+            'Show your face clearly in at least one photo',
+            'Include full body photos',
+            'Avoid group photos',
+          ].map((tip, i) => (
+            <View key={i} style={styles.tipItem}>
+              <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
+              <Text style={styles.tipText}>{tip}</Text>
+            </View>
+          ))}
         </View>
       </ScrollView>
 
       <View style={styles.footer}>
         <View style={styles.photoCount}>
-          <Text style={styles.photoCountText}>
-            {photos.length}/6 photos selected
-          </Text>
+          <Text style={styles.photoCountText}>{photos.length}/6 photos selected</Text>
           {photos.length < 3 && (
-            <Text style={styles.minimumText}>
-              Minimum 3 photos required
-            </Text>
+            <Text style={styles.minimumText}>Minimum 3 photos required</Text>
           )}
         </View>
-        
+
         <Button
-          title={isUploading || isRegistering ? "Processing..." : "Continue"}
+          title={isUploading || isRegistering ? 'Verifying & Uploading...' : 'Continue'}
           onPress={handleContinue}
           size="large"
           disabled={photos.length < 3 || isUploading || isRegistering}
@@ -374,6 +407,13 @@ const styles = StyleSheet.create({
     height: 108,
     borderRadius: BORDER_RADIUS.md,
   },
+  verifyingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   removeButton: {
     position: 'absolute',
     top: -8,
@@ -416,6 +456,28 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
     textAlign: 'center',
   },
+  securityNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.primarySoft,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  securityNoteText: {
+    flex: 1,
+    fontSize: FONTS.sizes.sm,
+    color: COLORS.text,
+    lineHeight: 20,
+  },
+  securityNoteLabel: {
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  // Keep importantNote alias for any remaining references
   importantNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',

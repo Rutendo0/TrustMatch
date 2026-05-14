@@ -209,19 +209,27 @@ async init() {
     return response.data; // array of { id, url, order, isMain }
   }
 
-  async uploadSelfie(imageUri: string) {
+  async uploadSelfie(imageUri: string, faceMatchScore?: number) {
     const formData = new FormData();
     formData.append('selfie', {
       uri: imageUri,
       type: 'image/jpeg',
       name: 'selfie.jpg',
     } as any);
+    if (faceMatchScore !== undefined) {
+      formData.append('faceMatchScore', String(faceMatchScore));
+    }
 
     const response = await this.client.post('/verification/selfie', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     });
+    return response.data;
+  }
+
+  async comparePhotoToSelfie(photoUrl: string) {
+    const response = await this.client.post('/verification/compare-photo-to-selfie', { photoUrl });
     return response.data;
   }
 
@@ -475,108 +483,93 @@ async getProfileInsights() {
 
   async compareFaces(image1: string, image2: string) {
     const externalApiUrl = process.env.EXPO_PUBLIC_FACE_VERIFICATION_API_URL;
-    
-    if (!externalApiUrl) {
-      console.warn('EXPO_PUBLIC_FACE_VERIFICATION_API_URL not set');
-      return { success: false, similarity: 0, isMatch: false, message: 'Face verification API not configured' };
+
+    // If external DeepFace URL is set, use it (higher accuracy)
+    if (externalApiUrl) {
+      console.log('[compareFaces] Using external DeepFace endpoint:', externalApiUrl);
+      try {
+        const formData = new FormData();
+
+        const appendImageFile = async (uri: string, fieldName: string) => {
+          if (uri.startsWith('http://') || uri.startsWith('https://')) {
+            let downloadUri = uri;
+            if (uri.includes('cloudinary.com') && uri.includes('/upload/')) {
+              downloadUri = uri.replace('/upload/', '/upload/q_100,f_jpg/');
+            }
+            const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
+            const downloaded = await FileSystem.downloadAsync(downloadUri, tempPath);
+            formData.append(fieldName, {
+              uri: downloaded.uri,
+              type: 'image/jpeg',
+              name: `${fieldName}.jpg`,
+            } as any);
+          } else {
+            formData.append(fieldName, {
+              uri,
+              type: 'image/jpeg',
+              name: `${fieldName}.jpg`,
+            } as any);
+          }
+        };
+
+        await appendImageFile(image1, 'img1');
+        await appendImageFile(image2, 'img2');
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        const response = await fetch(externalApiUrl, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' },
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`DeepFace API error (${response.status})`);
+        }
+
+        const data = await response.json();
+        const isMatch = data.verified === true;
+        const similarity = data.distance != null ? (1 - data.distance) : (data.confidence ? data.confidence / 100 : 0);
+
+        return {
+          success: true,
+          similarity,
+          isMatch,
+          threshold: data.threshold || 0.68,
+          message: isMatch ? 'Face match confirmed' : 'Faces do not match',
+        };
+      } catch (extErr: any) {
+        console.warn('[compareFaces] External API failed, falling back to local server:', extErr.message);
+        // Fall through to local server
+      }
     }
 
-    console.log('[compareFaces] Using endpoint:', externalApiUrl);
-
+    // Fallback: use local server's face-api.js endpoint
+    console.log('[compareFaces] Using local server face-compare endpoint');
     try {
-      const formData = new FormData();
-
-      // Helper to append image file to FormData for React Native
-      // React Native fetch understands { uri, type, name } objects
-      const appendImageFile = async (uri: string, fieldName: string) => {
-        if (uri.startsWith('http://') || uri.startsWith('https://')) {
-          // For Cloudinary URLs, request highest quality
-          let downloadUri = uri;
-          if (uri.includes('cloudinary.com') && uri.includes('/upload/')) {
-            downloadUri = uri.replace('/upload/', '/upload/q_100,f_jpg/');
-          }
-          const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
-          const downloaded = await FileSystem.downloadAsync(downloadUri, tempPath);
-          console.log(`[compareFaces] Downloaded ${fieldName}:`, downloaded.uri, 'status:', downloaded.status);
-          formData.append(fieldName, {
-            uri: downloaded.uri,
-            type: 'image/jpeg',
-            name: `${fieldName}.jpg`,
-          } as any);
-        } else {
-          // Local file URI — send directly
-          console.log(`[compareFaces] Using local ${fieldName}:`, uri.substring(0, 60));
-          formData.append(fieldName, {
-            uri,
-            type: 'image/jpeg',
-            name: `${fieldName}.jpg`,
-          } as any);
-        }
-      };
-
-      await appendImageFile(image1, 'img1');
-      await appendImageFile(image2, 'img2');
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for DeepFace
-
-      const response = await fetch(externalApiUrl, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Face verification failed (${response.status}): ${errorText}`);
-      }
-
-      const data = await response.json();
-
-      // Backend DeepFace response returns:
-      // { verified, distance, threshold, model, similarity_metric }
-      // We convert to our standard format
-      const isMatch = data.verified === true;
-      const similarity = data.distance != null ? (1 - data.distance) : (data.confidence ? data.confidence / 100 : 0);
-      const threshold = data.threshold || 0.68;
-
+      const response = await this.client.post('/verification/face-compare', {
+        image1,
+        image2,
+      }, { timeout: 60000 });
       return {
-        success: true,
-        similarity,
-        isMatch,
-        threshold,
-        message: isMatch ? 'Face match confirmed' : 'Faces do not match',
-        rawResponse: {
-          distance: data.distance,
-          verified: data.verified,
-          threshold: data.threshold,
-          model: data.model,
-          similarityMetric: data.similarity_metric,
-          detectorBackend: data.detector_backend,
-          facialAreas: data.facial_areas,
-          match: data.match,
-        }
+        success: response.data.success ?? true,
+        similarity: response.data.similarity ?? 0,
+        isMatch: response.data.isMatch ?? false,
+        threshold: response.data.threshold ?? 0.5,
+        message: response.data.message ?? '',
       };
-    } catch (error: any) {
-      console.error('Face comparison API error:', error);
-      if (error.name === 'AbortError') {
-        return {
-          success: false,
-          similarity: 0,
-          isMatch: false,
-          message: 'Face verification timed out. Please try again.',
-        };
-      }
+    } catch (localErr: any) {
+      console.error('[compareFaces] Local server also failed:', localErr.message);
       return {
         success: false,
         similarity: 0,
         isMatch: false,
-        message: error.message || 'Face comparison failed',
+        threshold: 0.5,
+        message: localErr.message || 'Face comparison failed',
       };
     }
   }

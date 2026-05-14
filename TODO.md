@@ -1,13 +1,8 @@
-# TrustMatch Fixes
+# TODO
 
-## 1. Slider Import Error [COMPLETED]
-- [x] Remove duplicate import ✓
-- [x] Verify bundler success ✓
+- [ ] Update Location sharing to auto-use saved emergency contact (SecureStore key: `emergency_contact`) and start sharing immediately.
+- [ ] Remove contact name/phone inputs from LocationShare UI.
+- [ ] Hardcode location sharing duration to 2 hours (120 minutes).
+- [ ] If emergency contact is missing, show alert guiding user to add it in Settings → Safety Center (or Profile onboarding).
+- [ ] Quick manual test: Safety Center → Share Location → verify timer starts and no inputs show.
 
-## 2. Improve Auth Error Messages [COMPLETED]
-- [x] Update backend 409 messages ✓
-- [x] Fix frontend ProfileDetailsScreen to show register 409 message directly ✓
-- [x] Test registration flow (press r to reload app)
-- [x] Mark complete ✓
-
-**Status:** Working on auth messaging improvement.

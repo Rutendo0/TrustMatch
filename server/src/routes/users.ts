@@ -330,7 +330,7 @@ router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Re
       },
       include: {
         photos: { orderBy: { order: 'asc' } },
-        verification: { select: { isVerified: true, idVerified: true, selfieVerified: true, emailVerified: true, liveVerified: true } },
+        verification: { select: { isVerified: true, idVerified: true, selfieVerified: true, emailVerified: true, liveVerified: true, faceMatchScore: true } },
         voiceNotes: {
           where: { isActive: true },
           take: 3,
@@ -342,24 +342,24 @@ router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Re
     });
 
     const response = profiles.map((p) => {
-      // Calculate real trust score based on verification steps completed
+      // Calculate real trust score — same model as auth/complete:
+      // email=20 (base), id=35, face scaled 0-35, photo=10
       const v = p.verification;
-      let trustScore = 0;
-      if (v?.emailVerified) trustScore += 20;
-      if (v?.idVerified) trustScore += 30;
-      if (v?.selfieVerified) trustScore += 25;
-      if (v?.liveVerified) trustScore += 25;
+      const rawFace    = v?.faceMatchScore ?? 0;
+      const facePoints = Math.round((rawFace / 100) * 35);
+      const idPoints   = v?.idVerified    ? 35 : 0;
+      const photoPoints = v?.idVerified   ? 10 : 0;
+      const trustScore  = Math.min(100, 20 + idPoints + facePoints + photoPoints);
 
-      // Calculate compatibility based on shared interests with current user
+
+      // Calculate compatibility based on shared interests with current user.
+      // Pure interest overlap — no fake base scores or bonuses.
       const profileInterests: string[] = p.interests ? JSON.parse(p.interests) : [];
       const currentUserInterests: string[] = currentUser.interests ? JSON.parse(currentUser.interests) : [];
       const sharedCount = profileInterests.filter(i => currentUserInterests.includes(i)).length;
-      const maxPossible = Math.max(profileInterests.length, currentUserInterests.length, 1);
-      const interestScore = Math.round((sharedCount / maxPossible) * 40); // up to 40%
-      const cityBonus = (p.city && currentUser.city && p.city.toLowerCase() === currentUser.city.toLowerCase()) ? 15 : 0;
-      const ageBonus = 20; // base compatibility
-      const verifiedBonus = v?.isVerified ? 25 : 0;
-      const compatibility = Math.min(100, ageBonus + interestScore + cityBonus + verifiedBonus);
+      const totalUnique = new Set([...profileInterests, ...currentUserInterests]).size;
+      // Jaccard similarity: shared / union — gives 0 if no overlap, honest score
+      const compatibility = totalUnique === 0 ? 0 : Math.round((sharedCount / totalUnique) * 100);
 
       return {
         id: p.id,

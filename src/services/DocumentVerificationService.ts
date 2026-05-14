@@ -85,106 +85,214 @@ const DOCUMENT_PATTERNS = {
 };
 
 /**
- * Smart extractor for OCR.space output from Zimbabwe NID.
- * OCR.space returns labels and values on separate lines, normalized to a single line.
- * Layout: "... SURNAME FIRST NAME DATE OF BIRTH ... 63-2271966 L 63 CIT F MIKITAYO RUTENDO BRENDA 19/07/2002 ..."
- * The values appear AFTER all the labels, in the same order.
+ * Smart extractor for OCR output from ID documents (Zimbabwe NID, passport, driver's license).
+ * Works on the normalized single-line OCR text returned by the server.
+ *
+ * Zimbabwe NID layout has TWO rows:
+ *   Row 1 (labels): SURNAME  FIRST NAME  DATE OF BIRTH  VILLAGE OF ORIGIN  PLACE OF BIRTH  DATE OF ISSUE
+ *   Row 2 (values): MIKITA YO  RUTENDO BRENDA  19/07/2002  HARARE  ...
+ *
+ * After server normalization all newlines become spaces, producing:
+ *   "... SURNAME FIRST NAME DATE OF BIRTH ... MIKITA YO RUTENDO BRENDA 19/07/2002 ..."
+ *
+ * Strategy order:
+ *  1. Two-row layout: labels block followed by values block (Zimbabwe NID style)
+ *  2. Label-inline: values sit directly after their label (passport / some IDs)
+ *  3. Positional: names appear right after the ID number
+ *  4. Generic: two ALL-CAPS words adjacent to a date
  */
 function extractNamesFromOcrText(text: string): { firstName?: string; lastName?: string; dob?: string } {
   const upper = text.toUpperCase();
 
-  // Pre-process: merge OCR-split words like "MIKITA YO" → "MIKITAYO"
-  // Short fragments (2-3 chars) after a long word are likely OCR splits
-  const mergedText = upper.replace(/([A-Z]{4,})\s+([A-Z]{2,3})(?=\s+[A-Z]{3,}|\s+\d|\s*$)/g, (match, a, b) => {
-    // Only merge if the fragment looks like a suffix, not a standalone word
-    const STANDALONE = new Set(['OF', 'IN', 'AT', 'TO', 'BY', 'OR', 'CIT', 'THE', 'AND', 'FOR', 'REP']);
-    if (STANDALONE.has(b)) return match;
-    return `${a}${b}`;
-  });
+  // ── Noise words to strip from captured name segments ────────────────────────
+  const NOISE = new Set([
+    'FIRST', 'NAME', 'NAMES', 'DATE', 'BIRTH', 'VILLAGE', 'PLACE', 'ORIGIN', 'ISSUE',
+    'SIGNATURE', 'HOLDER', 'FINGERPRINT', 'NATIONAL', 'REGISTRATION', 'REPUBLIC',
+    'ZIMBABWE', 'NUMBER', 'SURNAME', 'CIT', 'HARARE', 'BULAWAYO', 'GIVEN', 'OF',
+    'FORENAME', 'FORENAMES', 'AND', 'THE', 'SEX', 'GENDER', 'MALE', 'FEMALE',
+    'IDENTITY', 'CARD', 'DOCUMENT', 'PASSPORT', 'LICENSE', 'LICENCE', 'DRIVER',
+  ]);
 
-  // Strategy 1: Find surname and first name using label positions
-  const surnameMatch = mergedText.match(
-    /SURNAME\s+([A-Z]{3,}(?:\s+[A-Z]{3,})*?)(?=\s+FIRST\s+NAME|\s+DATE|\s+VILLAGE|\s+PLACE|\s*$)/
-  );
-  const firstNameMatch = mergedText.match(
-    /FIRST\s+NAME\s+([A-Z]{3,}(?:\s+[A-Z]{2,})*?)(?=\s+DATE|\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE|\s*$)/
-  );
-  const dobMatch = mergedText.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
+  // ── Clean helper: strip noise words and OCR punctuation/digits ───────────────
+  const cleanWords = (raw: string): string => {
+    return raw
+      .trim()
+      .replace(/[^A-Z\s\-']/g, ' ')  // remove non-alpha chars
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !NOISE.has(w))
+      .join(' ')
+      .trim();
+  };
 
-  // Strategy 2: For OCR.space layout where values come after all labels
-  // Find the block of uppercase words that appear after the ID number
-  // Pattern: "63-2271966 L 63 CIT F MIKITAYO RUTENDO BRENDA 19/07/2002"
-  let lastName: string | undefined;
-  let firstName: string | undefined;
+  // ── Extract DOB (used by all strategies) ────────────────────────────────────
+  const dobMatch = upper.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
 
-  if (surnameMatch?.[1]) {
-    // Take ALL words from surname match (handles compound surnames)
-    const words = surnameMatch[1].trim().split(/\s+/);
-    const IGNORE = new Set(['FIRST', 'NAME', 'DATE', 'BIRTH', 'VILLAGE', 'PLACE', 'ORIGIN', 'ISSUE', 'SIGNATURE', 'HOLDER', 'FINGERPRINT', 'NATIONAL', 'REGISTRATION', 'REPUBLIC', 'ZIMBABWE', 'NUMBER', 'SURNAME', 'CIT', 'HARARE', 'BULAWAYO']);
-    // Filter out noise words and join all valid name parts
-    const validWords = words.filter(w => w.length >= 2 && !IGNORE.has(w));
-    if (validWords.length > 0) {
-      lastName = validWords.join(' ');
-    }
-  }
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Strategy 1: Two-row layout (Zimbabwe NID)
+  //
+  // The OCR text contains the label row followed by the value row, all in one
+  // flat string. The label block ends at the last known label keyword, and the
+  // value block starts immediately after.
+  //
+  // Pattern: "... SURNAME FIRST NAME DATE OF BIRTH [more labels] <VALUES> ..."
+  // We find where the label block ends (after "DATE OF ISSUE" or similar) and
+  // then parse the value tokens positionally.
+  //
+  // Label order on Zimbabwe NID:
+  //   SURNAME | FIRST NAME | DATE OF BIRTH | VILLAGE OF ORIGIN | PLACE OF BIRTH | DATE OF ISSUE
+  // Value order (same positions):
+  //   <surname> | <first names> | <DD/MM/YYYY> | <village> | <place> | <DD/MM/YYYY>
+  // ─────────────────────────────────────────────────────────────────────────────
 
-  if (firstNameMatch?.[1]) {
-    // Take ALL words from first name match (handles middle names like "BRIGHT TINASHE")
-    const words = firstNameMatch[1].trim().split(/\s+/);
-    const IGNORE = new Set(['FIRST', 'NAME', 'DATE', 'BIRTH', 'VILLAGE', 'PLACE', 'ORIGIN', 'ISSUE', 'SIGNATURE', 'HOLDER', 'FINGERPRINT', 'NATIONAL', 'REGISTRATION', 'REPUBLIC', 'ZIMBABWE', 'NUMBER', 'SURNAME', 'CIT', 'HARARE', 'BULAWAYO']);
-    // Filter out noise words and join all valid name parts
-    const validWords = words.filter(w => w.length >= 2 && !IGNORE.has(w));
-    if (validWords.length > 0) {
-      firstName = validWords.join(' ');
-    }
-  }
-
-  // Strategy 3: If label-based failed, find values after the ID number pattern
-  if (!lastName || !firstName) {
-    const afterIdMatch = mergedText.match(/\d{2}-\d{7}\s+\w+\s+\d+\s+(\w+)\s+\w+\s+([A-Z]{3,})\s+([A-Z]{3,})/);
-    if (afterIdMatch) {
-      const IGNORE = new Set(['CIT', 'THE', 'AND', 'FOR']);
-      if (!lastName && afterIdMatch[2] && !IGNORE.has(afterIdMatch[2])) lastName = afterIdMatch[2];
-      if (!firstName && afterIdMatch[3] && !IGNORE.has(afterIdMatch[3])) firstName = afterIdMatch[3];
-    }
-  }
-
-  // Strategy 4: Look for names after "SURNAME" and "GIVEN NAME" / "NAMES" labels
-  // Some IDs use "GIVEN NAME" or "NAMES" instead of "FIRST NAME"
-  if (!firstName) {
-    const givenNameMatch = mergedText.match(
-      /(?:GIVEN\s+NAME|NAMES|FORENAME)\s+([A-Z]{2,}(?:\s+[A-Z]{2,})*?)(?=\s+DATE|\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE|\s+GENDER|\s*$)/
+  // Detect the two-row layout: labels appear consecutively with no values between them
+  // i.e. "SURNAME" is immediately followed (within ~30 chars) by "FIRST NAME"
+  const twoRowDetect = upper.match(/SURNAME.{0,30}?FIRST\s+NAME.{0,30}?DATE\s+OF\s+BIRTH/);
+  if (twoRowDetect) {
+    // Find the end of the label block — the last label before values start
+    // "DATE OF ISSUE" or "Signature of Holder" or "FINGERPRINT" marks the boundary
+    const labelBlockEnd = upper.search(
+      /DATE\s+OF\s+ISSUE|SIGNATURE\s+OF\s+HOLDER|FINGERPRINT/
     );
-    if (givenNameMatch?.[1]) {
-      const IGNORE = new Set(['DATE', 'BIRTH', 'VILLAGE', 'PLACE', 'ORIGIN', 'ISSUE', 'GENDER', 'NATIONAL', 'ZIMBABWE']);
-      const words = givenNameMatch[1].trim().split(/\s+/).filter(w => w.length >= 2 && !IGNORE.has(w));
-      if (words.length > 0) firstName = words.join(' ');
-    }
-  }
 
-  // Strategy 5: Extract any sequence of 2+ uppercase words that appear between
-  // the ID number and the date — these are almost always the name
-  if (!lastName && !firstName) {
-    const nameBlockMatch = mergedText.match(
-      /(?:\d{2}-\d{7}|\d{6,})\s+(?:[A-Z]\s+)?(?:\d+\s+)?(?:[A-Z]{1,3}\s+)?([A-Z]{3,}(?:\s+[A-Z]{3,})+)\s+\d{2}[\/\-]\d{2}[\/\-]\d{4}/
-    );
-    if (nameBlockMatch?.[1]) {
-      const IGNORE = new Set(['CIT', 'THE', 'AND', 'FOR', 'REP', 'NAT']);
-      const words = nameBlockMatch[1].trim().split(/\s+/).filter(w => w.length >= 3 && !IGNORE.has(w));
-      if (words.length >= 2) {
-        lastName = words[0];
-        firstName = words.slice(1).join(' ');
-      } else if (words.length === 1) {
-        lastName = words[0];
+    // The value block starts after the label block end marker
+    const valueBlockStart = labelBlockEnd !== -1
+      ? upper.indexOf(' ', labelBlockEnd + 10) + 1  // skip past the matched label phrase
+      : upper.search(/\d{2}-\d{7}/);                // fallback: start at ID number
+
+    if (valueBlockStart > 0) {
+      // Find the ID number in the value block — values come after it
+      // Format: "63-2271966 L 63 CIT F <SURNAME_VALUE> <FIRSTNAME_VALUE> <DOB>"
+      const afterIdNum = upper.substring(valueBlockStart);
+      const idNumMatch = afterIdNum.match(
+        /\d{2}-\d{7}[A-Z0-9\s]{0,20}?(?:CIT|CITIZEN)\s+[MF]\s+(.*)/
+      );
+
+      if (idNumMatch) {
+        const valueStr = idNumMatch[1].trim();
+        // valueStr: "MIKITA YO RUTENDO BRENDA 19/07/2002 HARARE 07/04/2022 Fingerprint"
+        // Split on the first date — everything before is names, everything after is location/dates
+        const dateIdx = valueStr.search(/\d{2}[\/\-]\d{2}[\/\-]\d{4}/);
+        if (dateIdx > 0) {
+          const namesPart = valueStr.substring(0, dateIdx).trim();
+          // namesPart: "MIKITA YO RUTENDO BRENDA"
+          // On Zimbabwe NID: surname comes first, then first name(s)
+          // We need to split namesPart into surname vs first names.
+          // The surname is the token(s) before the first name that appears in the
+          // registration data — but we don't have that here, so we use a heuristic:
+          // surname = first word(s) up to the point where a new "name group" starts.
+          //
+          // Better heuristic: the ID number section contains the district code
+          // (e.g. "63") which matches the first two digits of the ID number.
+          // The surname is typically ONE token (may have a space if OCR split it).
+          // We'll split on the assumption that surname = first 1-2 tokens,
+          // first name = remaining tokens — but we expose BOTH so the caller
+          // can do fuzzy matching against registration data.
+          const nameTokens = namesPart
+            .replace(/[^A-Z\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .split(' ')
+            .filter(w => w.length >= 2);
+
+          if (nameTokens.length >= 2) {
+            // Return all name tokens; the server's fuzzy matcher will find the right ones.
+            // We set lastName = first token, firstName = rest — this matches Zimbabwe NID order.
+            const lastName  = nameTokens[0];
+            const firstName = nameTokens.slice(1).join(' ');
+            console.log('[extractNames] Two-row strategy:', { lastName, firstName });
+            return {
+              lastName:  cleanWords(lastName),
+              firstName: cleanWords(firstName),
+              dob: dobMatch?.[1],
+            };
+          }
+        }
       }
     }
   }
 
-  return {
-    firstName: firstName?.toUpperCase(),
-    lastName: lastName?.toUpperCase(),
-    dob: dobMatch?.[1],
-  };
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Strategy 2: Label-inline extraction
+  // Handles: "SURNAME SIBANDA FIRST NAME BRIGHT TINASHE DATE OF BIRTH 26/10/2002"
+  // Also handles passport: "SURNAME SMITH GIVEN NAMES JOHN WILLIAM DATE OF BIRTH ..."
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const surnameMatch = upper.match(
+    /SURNAME[S]?\s+([A-Z][A-Z0-9\s\-']{0,40}?)(?=\s+(?:FIRST|GIVEN|FORE)\s*NAME|\s+DATE\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE|\s+GENDER|\s+SEX|\s+NATIONALITY|\s*$)/
+  );
+
+  const firstNameMatch = upper.match(
+    /(?:FIRST\s+NAMES?|GIVEN\s+NAMES?|FORENAMES?)\s+([A-Z][A-Z0-9\s\-']{0,60}?)(?=\s+DATE\s+OF\s+BIRTH|\s+VILLAGE|\s+PLACE\s+OF|\s+DATE\s+OF\s+ISSUE|\s+FINGERPRINT|\s+SIGNATURE|\s+NATIONALITY|\s+SEX|\s+GENDER|\s*$)/
+  );
+
+  const lastName2  = surnameMatch?.[1]   ? cleanWords(surnameMatch[1])   : undefined;
+  const firstName2 = firstNameMatch?.[1] ? cleanWords(firstNameMatch[1]) : undefined;
+
+  if (lastName2 || firstName2) {
+    console.log('[extractNames] Label-inline strategy:', { lastName: lastName2, firstName: firstName2 });
+    return {
+      firstName: firstName2 || undefined,
+      lastName:  lastName2  || undefined,
+      dob: dobMatch?.[1],
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Strategy 3: Positional extraction after Zimbabwe NID number
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const positional = upper.match(
+    /\d{2}-\d{7}[A-Z0-9\s]{0,20}?(?:CIT|CITIZEN)\s+[MF]\s+([A-Z]{2,})\s+([A-Z]{2,}(?:\s+[A-Z]{2,})*)\s+\d{2}[\/\-]\d{2}[\/\-]\d{4}/
+  );
+  if (positional) {
+    console.log('[extractNames] Positional strategy:', { lastName: positional[1], firstName: positional[2] });
+    return {
+      lastName:  cleanWords(positional[1]),
+      firstName: cleanWords(positional[2]),
+      dob: dobMatch?.[1],
+    };
+  }
+
+  // Looser positional
+  const positionalLoose = upper.match(
+    /\d{2}-\d{7}\S*\s+(?:\S+\s+){0,5}([A-Z]{3,})\s+([A-Z]{3,}(?:\s+[A-Z]{3,})?)\s+\d{2}[\/\-]\d{2}[\/\-]\d{4}/
+  );
+  if (positionalLoose) {
+    const c1 = cleanWords(positionalLoose[1]);
+    const c2 = cleanWords(positionalLoose[2]);
+    if (c1 && c2) {
+      console.log('[extractNames] Positional-loose strategy:', { lastName: c1, firstName: c2 });
+      return { lastName: c1, firstName: c2, dob: dobMatch?.[1] };
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Strategy 4: Generic — two ALL-CAPS words adjacent to a date
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  if (dobMatch) {
+    const dobIndex = upper.indexOf(dobMatch[1]);
+
+    const beforeDob = upper.substring(0, dobIndex).trim();
+    const beforeWords = beforeDob.split(/\s+/).filter(w => /^[A-Z]{2,}$/.test(w) && !NOISE.has(w));
+    if (beforeWords.length >= 2) {
+      const last = beforeWords[beforeWords.length - 1];
+      const secondLast = beforeWords[beforeWords.length - 2];
+      console.log('[extractNames] Generic-before strategy:', { lastName: secondLast, firstName: last });
+      return { lastName: secondLast, firstName: last, dob: dobMatch[1] };
+    }
+
+    const afterDob = upper.substring(dobIndex + dobMatch[1].length).trim();
+    const afterWords = afterDob.split(/\s+/).filter(w => /^[A-Z]{2,}$/.test(w) && !NOISE.has(w));
+    if (afterWords.length >= 2) {
+      console.log('[extractNames] Generic-after strategy:', { lastName: afterWords[0], firstName: afterWords.slice(1).join(' ') });
+      return { lastName: afterWords[0], firstName: afterWords.slice(1).join(' '), dob: dobMatch[1] };
+    }
+  }
+
+  return { firstName: undefined, lastName: undefined, dob: dobMatch?.[1] };
 }
 
 // Common date formats
@@ -301,6 +409,20 @@ class DocumentVerificationService {
             break;
         }
       }
+    }
+
+    // If label-based patterns didn't find a name, fall back to the smart extractor
+    if (!extractedData.firstName && !extractedData.lastName && !extractedData.fullName) {
+      const smartNames = extractNamesFromOcrText(text);
+      if (smartNames.firstName) extractedData.firstName = smartNames.firstName;
+      if (smartNames.lastName) extractedData.lastName = smartNames.lastName;
+      if (!extractedData.dateOfBirth && smartNames.dob) {
+        extractedData.dateOfBirth = this.normalizeDate(smartNames.dob);
+      }
+      console.log('[parseDocumentText] Smart extractor fallback result:', {
+        firstName: extractedData.firstName,
+        lastName: extractedData.lastName,
+      });
     }
 
     return extractedData;

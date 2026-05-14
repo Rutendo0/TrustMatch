@@ -11,6 +11,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Input } from '../../components/common';
 import { api } from '../../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { registrationProgress } from '../../services/RegistrationProgressService';
 import { COLORS, FONTS, SPACING } from '../../constants/theme';
 
@@ -59,8 +60,12 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
       await api.verifyEmailCode(code);
 
       // Email verified — complete registration and activate account
+      let trustScore = 0;
+      let verificationData: any = {};
       try {
-        await api.completeRegistration();
+        const completeResult = await api.completeRegistration();
+        trustScore = completeResult.trustScore ?? 0;
+        verificationData = completeResult.verification ?? {};
       } catch (completeError) {
         console.error('Complete registration error:', completeError);
         // Continue even if complete fails - account activated on backend
@@ -68,11 +73,17 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
 
       // Clear registration progress since verification is complete
       await registrationProgress.clearProgress();
-      
-      // Show welcome screen for new users
+
+      // Mark that this user needs to see the welcome/onboarding screen.
+      await AsyncStorage.setItem('hasSeenWelcome', 'false');
+
+      // Show verification success screen with trust score
       navigation.reset({
         index: 0,
-        routes: [{ name: 'WelcomeNewUser' }],
+        routes: [{
+          name: 'VerificationSuccess',
+          params: { trustScore, verification: verificationData },
+        }],
       });
 
     } catch (error: any) {
