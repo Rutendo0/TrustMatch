@@ -353,6 +353,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
         lastMessage: lastMessage ? {
           content: lastMessage.content,
           sentAt: lastMessage.createdAt,
+          senderId: lastMessage.senderId,
           isRead: !!lastMessage.readAt,
         } : null,
         matchedAt: match.createdAt,

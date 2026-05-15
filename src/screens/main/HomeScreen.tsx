@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect, useLayoutEffect, useCallback } from 'react';
+﻿import React, { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Alert,
   Animated,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -76,6 +77,57 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     },
     [stampAnim]
   );
+
+  // ── Swipe gesture (PanResponder) ─────────────────────────────────────────
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const swipeY = useRef(new Animated.Value(0)).current;
+  const SWIPE_THRESHOLD = 100; // px needed to trigger like/dislike
+
+  const resetSwipe = useCallback(() => {
+    Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, friction: 5 }).start();
+    Animated.spring(swipeY, { toValue: 0, useNativeDriver: true, friction: 5 }).start();
+  }, [swipeX, swipeY]);
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gs) => {
+      // Only capture horizontal swipes (dx > dy) to avoid blocking vertical scroll
+      return Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 8;
+    },
+    onPanResponderMove: (_, gs) => {
+      swipeX.setValue(gs.dx);
+      swipeY.setValue(gs.dy * 0.15); // slight vertical tilt
+    },
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dx > SWIPE_THRESHOLD) {
+        // Swipe right → LIKE
+        Animated.timing(swipeX, { toValue: 500, duration: 250, useNativeDriver: true }).start(() => {
+          swipeX.setValue(0); swipeY.setValue(0);
+          showStamp('like', () => {});
+        });
+        handleLike();
+      } else if (gs.dx < -SWIPE_THRESHOLD) {
+        // Swipe left → DISLIKE
+        Animated.timing(swipeX, { toValue: -500, duration: 250, useNativeDriver: true }).start(() => {
+          swipeX.setValue(0); swipeY.setValue(0);
+          showStamp('nope', () => {});
+        });
+        handleDislike();
+      } else {
+        resetSwipe();
+      }
+    },
+    onPanResponderTerminate: resetSwipe,
+  }), [handleLike, handleDislike, showStamp, resetSwipe, swipeX, swipeY]);
+
+  // Derived animated values for card tilt and stamp opacity
+  const cardRotate = swipeX.interpolate({
+    inputRange: [-200, 0, 200],
+    outputRange: ['-12deg', '0deg', '12deg'],
+    extrapolate: 'clamp',
+  });
+  const likeOpacity = swipeX.interpolate({ inputRange: [20, 80], outputRange: [0, 1], extrapolate: 'clamp' });
+  const nopeOpacity = swipeX.interpolate({ inputRange: [-80, -20], outputRange: [1, 0], extrapolate: 'clamp' });
 
   // ── Header ───────────────────────────────────────────────────────────────
   useLayoutEffect(() => {
@@ -379,7 +431,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
       {/* Card area */}
       <View style={styles.contentContainer}>
-        <View style={[dynamicStyles.card, styles.profileCard]}>
+        <Animated.View
+          style={[
+            dynamicStyles.card,
+            styles.profileCard,
+            {
+              transform: [
+                { translateX: swipeX },
+                { translateY: swipeY },
+                { rotate: cardRotate },
+              ],
+            },
+          ]}
+          {...panResponder.panHandlers}
+        >
+          {/* Swipe LIKE overlay */}
+          <Animated.View style={[styles.swipeOverlay, styles.swipeOverlayLike, { opacity: likeOpacity }]} pointerEvents="none">
+            <Text style={styles.swipeOverlayText}>LIKE</Text>
+          </Animated.View>
+          {/* Swipe NOPE overlay */}
+          <Animated.View style={[styles.swipeOverlay, styles.swipeOverlayNope, { opacity: nopeOpacity }]} pointerEvents="none">
+            <Text style={styles.swipeOverlayText}>NOPE</Text>
+          </Animated.View>
+
           {/* Photo */}
           <Image
             source={{ uri: currentProfile.photos[currentPhotoIndex] }}
@@ -526,7 +600,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               ))}
             </View>
           </View>
-        </View>
+        </Animated.View>
       </View>
 
       {/* Progress bar */}
@@ -636,6 +710,33 @@ const styles = StyleSheet.create({
   },
   profileCard: {
     position: 'relative',
+  },
+  swipeOverlay: {
+    position: 'absolute',
+    top: 60,
+    zIndex: 10,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 3,
+  },
+  swipeOverlayLike: {
+    left: 20,
+    borderColor: '#10B981',
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    transform: [{ rotate: '-15deg' }],
+  },
+  swipeOverlayNope: {
+    right: 20,
+    borderColor: COLORS.error,
+    backgroundColor: 'rgba(220,38,38,0.15)',
+    transform: [{ rotate: '15deg' }],
+  },
+  swipeOverlayText: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: COLORS.white,
+    letterSpacing: 2,
   },
   cardImage: {
     width: '100%',

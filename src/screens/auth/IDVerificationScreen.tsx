@@ -195,8 +195,8 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      aspect: [16, 10],
-      quality: 0.7, // lower quality = smaller base64 payload → faster OCR upload
+      aspect: [4, 3],
+      quality: 0.9,
     });
 
     if (!result.canceled) {
@@ -217,8 +217,8 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
 
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
-      aspect: [16, 10],
-      quality: 0.7, // lower quality = smaller base64 payload → faster OCR upload
+      aspect: [4, 3],
+      quality: 0.9,
     });
 
     if (!result.canceled) {

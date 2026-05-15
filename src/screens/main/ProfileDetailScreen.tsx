@@ -28,6 +28,7 @@ interface Profile {
   aboutMe: string;
   occupation: string;
   education: string;
+  relationshipGoal?: string;
   distance: string;
   photos: string[];
   isVerified: boolean;
@@ -140,7 +141,9 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
         aboutMe: userData.aboutMe || '',
         occupation: userData.occupation || '',
         education: userData.education || '',
-        distance: userData.city || userData.country || '',
+        distance: userData.city && userData.country
+          ? `${userData.city}, ${userData.country}`
+          : userData.city || userData.country || '',
         // Own profile: photos is array of objects { url }. Other user: photos is array of strings.
         photos: isViewingOwnProfile
           ? (userData.photos?.filter((p: any) => p.url)?.map((p: any) => p.url) || [])
@@ -152,6 +155,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
         interests: Array.isArray(userData.interests) ? userData.interests : [],
         safetyFeatures: userData.safetyFeatures || (userData.isVerified ? ['Verified'] : []),
         verificationBadges: userData.verificationBadges || [],
+        relationshipGoal: userData.relationshipGoal || '',
       };
     }
     return initialProfile || defaultProfile;
@@ -212,13 +216,28 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
     );
   };
 
-  const handleLike = () => {
-    // Profile liked action
-    navigation.goBack();
+  const handleLike = async () => {
+    if (isCurrentUserProfile) return;
+    try {
+      const result = await api.swipe(profile.id, 'LIKE');
+      if (result?.isMatch) {
+        Alert.alert("It's a Match! 🎉", `You and ${profile.name} liked each other!`, [
+          { text: 'Send Message', onPress: () => { navigation.goBack(); navigation.navigate('Chat', { matchId: result.matchId, name: profile.name }); } },
+          { text: 'Keep Browsing', onPress: () => navigation.goBack() },
+        ]);
+      } else {
+        navigation.goBack();
+      }
+    } catch {
+      navigation.goBack();
+    }
   };
 
-  const handlePass = () => {
-    // Profile passed action
+  const handlePass = async () => {
+    if (isCurrentUserProfile) return;
+    try {
+      await api.swipe(profile.id, 'DISLIKE');
+    } catch {}
     navigation.goBack();
   };
 
@@ -370,7 +389,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
                     onPress={() => setCurrentPhotoIndex(index)}
                   >
                     <Image source={{ uri: photo }} style={styles.thumbnailImage} />
-                    {index === currentPhotoIndex && canDeletePhoto && (
+                    {isCurrentUserProfile && index === currentPhotoIndex && canDeletePhoto && (
                       <TouchableOpacity
                         style={styles.deleteButton}
                         onPress={() => handleDeletePhoto(userData?.photos?.[index]?.id)}
@@ -380,7 +399,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
                     )}
                   </TouchableOpacity>
                 ))}
-                {canAddPhoto && (
+                {isCurrentUserProfile && canAddPhoto && (
                   <TouchableOpacity
                     style={styles.addThumbnail}
                     onPress={handleAddPhoto}
@@ -409,6 +428,28 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({ naviga
             ) : (
               <Text style={styles.bio}>{profile.bio}</Text>
             )}
+
+            {/* Quick facts row */}
+            <View style={styles.factsRow}>
+              {profile.occupation ? (
+                <View style={styles.factChip}>
+                  <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
+                  <Text style={styles.factText}>{profile.occupation}</Text>
+                </View>
+              ) : null}
+              {profile.education ? (
+                <View style={styles.factChip}>
+                  <Ionicons name="school-outline" size={14} color={COLORS.textSecondary} />
+                  <Text style={styles.factText}>{profile.education}</Text>
+                </View>
+              ) : null}
+              {profile.relationshipGoal ? (
+                <View style={styles.factChip}>
+                  <Ionicons name="heart-outline" size={14} color={COLORS.textSecondary} />
+                  <Text style={styles.factText}>Looking for {profile.relationshipGoal.toLowerCase()}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
 
           {/* Safety Features */}
@@ -744,6 +785,25 @@ const styles = StyleSheet.create({
     fontSize: normalize(FONTS.sizes.md),
     color: COLORS.text,
     lineHeight: normalize(22),
+  },
+  factsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+  },
+  factChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  factText: {
+    fontSize: normalize(FONTS.sizes.sm),
+    color: COLORS.textSecondary,
   },
   safetyGrid: {
     flexDirection: 'row',

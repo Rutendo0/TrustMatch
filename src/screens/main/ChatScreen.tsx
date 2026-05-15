@@ -653,9 +653,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ navigation, route }) => 
         {isMe && isLast && showReadReceipts && (
           <View style={s.receipt}>
             <Ionicons
-              name={item.status === 'read' ? 'checkmark-done' : 'checkmark-done'}
+              name={item.status === 'sent' ? 'checkmark' : 'checkmark-done'}
               size={13}
-              color={item.status === 'read' ? COLORS.primary : COLORS.textLight}
+              color={item.status === 'read' ? '#2196F3' : COLORS.textLight}
             />
             {item.status === 'read' && <Text style={s.receiptText}>Seen</Text>}
           </View>

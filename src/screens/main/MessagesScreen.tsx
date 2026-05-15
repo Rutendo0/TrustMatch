@@ -79,6 +79,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
       
       data.forEach((m: any) => {
         const sentByOther = m.lastMessage?.senderId && m.lastMessage.senderId !== currentUserId;
+        const hasUnread = sentByOther && m.lastMessage && !m.lastMessage.isRead;
         const match: Match = {
           id: m.id,
           name: m.user?.firstName || 'User',
@@ -89,7 +90,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({ navigation }) =>
           safetyLevel: 'high' as const,
           lastMessage: m.lastMessage?.content || undefined,
           lastMessageTime: m.lastMessage?.sentAt ? formatTime(m.lastMessage.sentAt) : '',
-          unreadCount: (m.lastMessage && !m.lastMessage.isRead && sentByOther) ? 1 : 0,
+          unreadCount: hasUnread ? (m.unreadCount || 1) : 0,
           isOnline: m.user?.isOnline || false,
         };
         

@@ -80,7 +80,7 @@ export const SafetyCenterScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.sectionTitle}>Location Sharing</Text>
           <View style={styles.card}>
             <Text style={styles.cardDesc}>
-              Share your live location with a trusted contact before meeting someone new. They'll receive real-time updates for the duration you choose.
+              Tap the button below to share your live location with your emergency contact for 2 hours. No setup needed — it uses the contact you saved in your profile.
             </Text>
             <LocationShare
               onShareStarted={() => setLocationShareActive(true)}

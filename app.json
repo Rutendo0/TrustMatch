@@ -12,7 +12,7 @@
       "backgroundColor": "#DC2626"
     },
     "updates": {
-      "url": "https://u.expo.dev/2665516f-2327-484f-9b1b-b4541707759b",
+      "url": "https://u.expo.dev/4445c7cb-0ea3-44b6-b75e-76055cac64bb",
       "enabled": false
     },
     "runtimeVersion": {
@@ -38,7 +38,9 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -51,13 +53,19 @@
           "cameraPermission": "TrustMatch needs camera access for identity verification."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "TrustMatch uses your location to share with your emergency contact for safety."
+        }
+      ],
       "expo-secure-store"
     ],
     "extra": {
       "eas": {
-        "projectId": "2665516f-2327-484f-9b1b-b4541707759b"
+        "projectId": "4445c7cb-0ea3-44b6-b75e-76055cac64bb"
       }
     },
-    "owner": "brighttinashe"
+    "owner": "makasimb"
   }
 }

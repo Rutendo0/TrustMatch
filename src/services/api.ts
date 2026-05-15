@@ -492,6 +492,7 @@ async getProfileInsights() {
 
         const appendImageFile = async (uri: string, fieldName: string) => {
           if (uri.startsWith('http://') || uri.startsWith('https://')) {
+            // Remote URL — download to cache first
             let downloadUri = uri;
             if (uri.includes('cloudinary.com') && uri.includes('/upload/')) {
               downloadUri = uri.replace('/upload/', '/upload/q_100,f_jpg/');
@@ -504,8 +505,19 @@ async getProfileInsights() {
               name: `${fieldName}.jpg`,
             } as any);
           } else {
+            // Local URI (file://, content://, or cache path) —
+            // copy to a guaranteed file:// path so it works in production APKs.
+            // content:// URIs from Android media picker are not directly readable
+            // by the fetch API in a standalone build.
+            let fileUri = uri;
+            if (!uri.startsWith('file://')) {
+              // Copy to cache to get a proper file:// URI
+              const destPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
+              await FileSystem.copyAsync({ from: uri, to: destPath });
+              fileUri = destPath;
+            }
             formData.append(fieldName, {
-              uri,
+              uri: fileUri,
               type: 'image/jpeg',
               name: `${fieldName}.jpg`,
             } as any);
