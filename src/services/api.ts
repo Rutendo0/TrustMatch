@@ -491,6 +491,8 @@ async getProfileInsights() {
         const formData = new FormData();
 
         const appendImageFile = async (uri: string, fieldName: string) => {
+          let fileUri = uri;
+
           if (uri.startsWith('http://') || uri.startsWith('https://')) {
             // Remote URL — download to cache first
             let downloadUri = uri;
@@ -499,29 +501,20 @@ async getProfileInsights() {
             }
             const tempPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
             const downloaded = await FileSystem.downloadAsync(downloadUri, tempPath);
-            formData.append(fieldName, {
-              uri: downloaded.uri,
-              type: 'image/jpeg',
-              name: `${fieldName}.jpg`,
-            } as any);
-          } else {
-            // Local URI (file://, content://, or cache path) —
-            // copy to a guaranteed file:// path so it works in production APKs.
-            // content:// URIs from Android media picker are not directly readable
-            // by the fetch API in a standalone build.
-            let fileUri = uri;
-            if (!uri.startsWith('file://')) {
-              // Copy to cache to get a proper file:// URI
-              const destPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
-              await FileSystem.copyAsync({ from: uri, to: destPath });
-              fileUri = destPath;
-            }
-            formData.append(fieldName, {
-              uri: fileUri,
-              type: 'image/jpeg',
-              name: `${fieldName}.jpg`,
-            } as any);
+            fileUri = downloaded.uri;
+          } else if (!uri.startsWith('file://')) {
+            // content:// or other Android URI — copy to file:// first
+            const destPath = `${FileSystem.cacheDirectory}${fieldName}_${Date.now()}.jpg`;
+            await FileSystem.copyAsync({ from: uri, to: destPath });
+            fileUri = destPath;
           }
+
+          // Append as a proper file object — works reliably in standalone APKs
+          formData.append(fieldName, {
+            uri: fileUri,
+            type: 'image/jpeg',
+            name: `${fieldName}.jpg`,
+          } as any);
         };
 
         await appendImageFile(image1, 'img1');

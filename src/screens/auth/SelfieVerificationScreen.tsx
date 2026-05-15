@@ -126,17 +126,30 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
       setSimilarity(sim);
 
       if (!faceResult.success) {
-        // Could not detect a face in one of the images
         clearTimeout(timeoutRef.current!);
+
+        // Prefer structured/machine-readable fields if the external API provides them.
+        // Your external endpoint currently returns at least `verified` and error text,
+        // but when it says "No face detected in first/second image" we map it reliably.
+        const msg = (faceResult.message || '').toLowerCase();
+        const noFaceInId =
+          msg.includes('no face detected') &&
+          (msg.includes('first image') || msg.includes('id') || msg.includes('img1'));
         const noFaceInSelfie =
-          faceResult.message?.toLowerCase().includes('selfie') ||
-          faceResult.message?.toLowerCase().includes('second');
+          msg.includes('no face detected') &&
+          (msg.includes('second image') || msg.includes('selfie') || msg.includes('img2'));
+
+        // Fallback: keep the old heuristic for any unexpected message formats.
+        const fallbackNoFaceInSelfie = msg.includes('selfie') || msg.includes('second');
+
+        const showSelfie = noFaceInSelfie || (!noFaceInId && fallbackNoFaceInSelfie);
+
         setFailure({
           reason: 'no_face_detected',
-          message: noFaceInSelfie
+          message: showSelfie
             ? 'No face detected in your selfie.'
             : 'No face detected in your ID photo.',
-          detail: noFaceInSelfie
+          detail: showSelfie
             ? 'Make sure your face is clearly visible, well-lit, and centred in the frame.'
             : 'Your ID photo may be blurry or the face area is not visible. Please go back and re-upload your ID.',
         });
