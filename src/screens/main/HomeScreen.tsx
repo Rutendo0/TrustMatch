@@ -284,23 +284,34 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       }
       const data = await api.getDiscoverProfiles(10, filters);
       if (!data || data.length === 0) { setProfiles([]); setLoading(false); return; }
-      const mappedProfiles: Profile[] = (data || []).map((p: any) => ({
-        id: p?.id || Math.random().toString(),
-        name: p?.firstName || p?.name || 'User',
-        age: p?.age || 25,
-        bio: p?.bio || 'No bio available',
-        distance: p?.city || p?.country || 'Unknown location',
-        photos: p?.photos?.length > 0 
-          ? p.photos.map((ph: any) => typeof ph === 'string' ? ph : ph?.url).filter(Boolean)
-          : ['https://via.placeholder.com/400'],
-        isVerified: p?.isVerified || false,
-        trustScore: p?.trustScore ?? 0,
-        compatibility: p?.compatibility ?? 0,
-        personalityType: 'N/A',
-        interests: p?.interests || [],
-        safetyFeatures: p?.isVerified ? ['Verified'] : [],
-        verificationBadges: p?.isVerified ? ['Identity', 'Selfie'] : [],
-      }));
+      const isUUID = (value: any) => {
+        if (typeof value !== 'string') return false;
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+      };
+
+      const mappedProfiles: Profile[] = (data || [])
+        .map((p: any) => {
+          const rawId = p?.id ?? p?.userId ?? p?.user_id;
+          return {
+            id: rawId,
+            name: p?.firstName || p?.name || 'User',
+            age: p?.age || 25,
+            bio: p?.bio || 'No bio available',
+            distance: p?.city || p?.country || 'Unknown location',
+            photos:
+              p?.photos?.length > 0
+                ? p.photos.map((ph: any) => (typeof ph === 'string' ? ph : ph?.url)).filter(Boolean)
+                : ['https://via.placeholder.com/400'],
+            isVerified: p?.isVerified || false,
+            trustScore: p?.trustScore ?? 0,
+            compatibility: p?.compatibility ?? 0,
+            personalityType: 'N/A',
+            interests: p?.interests || [],
+            safetyFeatures: p?.isVerified ? ['Verified'] : [],
+            verificationBadges: p?.isVerified ? ['Identity', 'Selfie'] : [],
+          } as Profile;
+        })
+        .filter((p) => isUUID(p.id));
       setProfiles(mappedProfiles);
     } catch (error: any) {
       if (error.response?.status === 403) {
@@ -495,7 +506,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           )}
 
           {/* ── Tap zones overlay (top 60% of card) ── */}
-          <View style={styles.tapZoneContainer} pointerEvents="box-none">
+          <View style={styles.tapZoneContainer} pointerEvents="none">
             {/* Left 40% — photo prev / card dislike */}
             <TouchableOpacity
               style={styles.tapZoneLeft}
@@ -524,7 +535,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           </View>
 
           {/* ── Full-card tap zones (bottom 40% of card height) for like/dislike ── */}
-          <View style={styles.tapZoneBottomContainer} pointerEvents="box-none">
+          <View style={styles.tapZoneBottomContainer} pointerEvents="none">
             <TouchableOpacity
               style={styles.tapZoneBottomLeft}
               activeOpacity={1}

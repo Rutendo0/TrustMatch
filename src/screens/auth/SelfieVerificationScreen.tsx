@@ -131,20 +131,38 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         // Prefer structured/machine-readable fields if the external API provides them.
         // Your external endpoint currently returns at least `verified` and error text,
         // but when it says "No face detected in first/second image" we map it reliably.
-        const msg = (faceResult.message || '').toLowerCase();
-        const noFaceInId =
-          msg.includes('no face detected') &&
-          (msg.includes('first image') || msg.includes('id') || msg.includes('img1'));
-        const noFaceInSelfie =
-          msg.includes('no face detected') &&
-          (msg.includes('second image') || msg.includes('selfie') || msg.includes('img2'));
+      const rawMessage = faceResult.message || '';
+      const msg = rawMessage.toLowerCase();
 
-        // Fallback: keep the old heuristic for any unexpected message formats.
-        const fallbackNoFaceInSelfie = msg.includes('selfie') || msg.includes('second');
+      // Debug: help determine what your external face endpoint is returning in production.
+      // (Visible in Metro bundler / Android logs.)
+      console.log('[SelfieVerification] faceResult.message:', rawMessage);
 
-        const showSelfie = noFaceInSelfie || (!noFaceInId && fallbackNoFaceInSelfie);
+      const noFaceInId =
+        msg.includes('no face detected') &&
+        (msg.includes('first image') || msg.includes('id') || msg.includes('img1'));
 
-        setFailure({
+      const noFaceInSelfie =
+        msg.includes('no face detected') &&
+        (msg.includes('second image') || msg.includes('selfie') || msg.includes('img2'));
+
+      // Some endpoints say "No face detected in your ID photo" directly.
+      const idPhotoDirect = msg.includes('id photo');
+      const selfieDirect = msg.includes('selfie');
+
+      // Decide which side is missing.
+      // Priority:
+      // 1) explicit second/selfie markers => selfie missing
+      // 2) explicit first/id markers => id missing
+      // 3) otherwise fallback to previous heuristic
+      const fallbackNoFaceInSelfie = msg.includes('selfie') || msg.includes('second');
+
+      const showSelfie =
+        noFaceInSelfie ||
+        (!noFaceInId && !idPhotoDirect && selfieDirect) ||
+        (!noFaceInId && fallbackNoFaceInSelfie);
+
+      setFailure({
           reason: 'no_face_detected',
           message: showSelfie
             ? 'No face detected in your selfie.'
