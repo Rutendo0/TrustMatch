@@ -28,6 +28,7 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resending, setResending] = useState(false);
+  // displayedCode is only used in __DEV__ mode — never shown in production builds
   const [displayedCode, setDisplayedCode] = useState<string | null>(null);
 
   // Send verification code on mount (after ID + Selfie verification is complete)
@@ -35,14 +36,15 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
     const sendCode = async () => {
       try {
         const response = await api.sendEmailVerification();
-        // If email fails to send, show the code from server response
-        if (response.code) {
+        // Auto-fill only if the email actually failed to send (Resend domain not verified).
+        // Real users who receive the email will type it themselves.
+        // In __DEV__ always show it for easier testing.
+        if (response.code && (__DEV__ || response.emailFailed)) {
           setDisplayedCode(response.code);
-          setCode(response.code); // auto-fill so user just taps Verify
+          setCode(response.code);
         }
       } catch (error) {
         console.error('Failed to send verification code:', error);
-        // Continue anyway - user can request a new code
       }
     };
     sendCode();
@@ -103,11 +105,10 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
     try {
       // Request new code
       const response = await api.resendEmailCode();
-      // If email fails to send, show the code from server response
-      if (response.code) {
+      if (response.code && (__DEV__ || response.emailFailed)) {
         setDisplayedCode(response.code);
         setCode(response.code);
-        Alert.alert('New Code Ready', `Your verification code is: ${response.code}`);
+        Alert.alert('Code Ready', `Your verification code is: ${response.code}`);
       } else {
         Alert.alert('Code Sent', 'A new verification code has been sent to your email.');
       }

@@ -168,8 +168,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
       clearTimeout(timeoutRef.current!);
       setStep('success');
 
-      // Stay on the result screen longer so the user can read it.
-      // (User feedback: 1.5s was too fast.)
+      // Auto-navigate after 2 seconds, but user can also tap Continue immediately
       setTimeout(() => {
         navigation.navigate('PhotoUploadScreen', {
           formData: {
@@ -179,7 +178,7 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
           },
           verifiedSelfieUri: photoUri,
         });
-      }, 6000);
+      }, 2000);
     } catch (err: any) {
       clearTimeout(timeoutRef.current!);
       console.error('[SelfieVerification] error:', err);

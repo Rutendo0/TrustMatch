@@ -1131,8 +1131,9 @@ router.post('/selfie', authMiddleware, async (req: AuthRequest, res: Response) =
 
     const relPath = `/uploads/selfies/${req.file.filename}`;
 
-    // Try to upload to Cloudinary for a persistent URL
-    let selfieUrl = relPath;
+    // Upload to Cloudinary — required for persistent URL.
+    // A local path would break after any Railway redeploy.
+    let selfieUrl: string;
     try {
       const { cloudinary: cld } = await import('../lib/cloudinary');
       const result = await cld.uploader.upload(req.file.path, {
@@ -1143,7 +1144,13 @@ router.post('/selfie', authMiddleware, async (req: AuthRequest, res: Response) =
       // Clean up local file after Cloudinary upload
       try { fs.unlinkSync(req.file.path); } catch {}
     } catch (cloudErr) {
-      console.warn('Cloudinary selfie upload failed, using local path:', cloudErr);
+      console.error('Cloudinary selfie upload failed:', cloudErr);
+      // Clean up temp file
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.status(500).json({
+        error: 'Failed to store selfie. Please try again.',
+        details: 'Image storage service unavailable.',
+      });
     }
 
     await prisma.verification.update({

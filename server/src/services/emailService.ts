@@ -19,7 +19,7 @@ const FROM_EMAIL = process.env.EMAIL_FROM || 'TrustMatch <noreply@trustmatch.app
 // ── Send verification email ───────────────────────────────────────────────────
 export const sendVerificationEmail = async (
   userId: string
-): Promise<{ success: boolean; message: string; code?: string }> => {
+): Promise<{ success: boolean; message: string; code?: string; emailFailed?: boolean }> => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -74,14 +74,15 @@ export const sendVerificationEmail = async (
 
       if (error) {
         console.error('[Resend] Failed to send email:', error);
-        // Fall through to console log as fallback
+        // Fall through to console log + return code so client can auto-fill
       } else {
         console.log(`[Email] Verification code sent to ${user.email}`);
         return { success: true, message: 'Verification code sent to your email' };
       }
     }
 
-    // Fallback: log to console (development / no API key)
+    // Fallback: log to console and return code so the app can auto-fill
+    // This happens when: no Resend key, or Resend rejected (e.g. unverified domain)
     console.log(`\n========================================`);
     console.log(`[EMAIL VERIFICATION CODE - NO PROVIDER]`);
     console.log(`  User  : ${user.email}`);
@@ -89,7 +90,7 @@ export const sendVerificationEmail = async (
     console.log(`  Expiry: ${CODE_EXPIRY_MINUTES} minutes`);
     console.log(`========================================\n`);
 
-    return { success: true, message: 'Verification code generated', code };
+    return { success: true, message: 'Verification code generated', code, emailFailed: true };
   } catch (error) {
     console.error('Send verification email error:', error);
     return { success: false, message: 'Failed to send verification email' };
