@@ -135,24 +135,22 @@ router.put(
       const userId = req.userId!;
       const { firstName, lastName, bio, city, country, occupation, education, relationshipGoal, aboutMe, interests } = req.body;
 
-      // Convert interests array to JSON string if provided
-      const interestsJson = interests ? JSON.stringify(interests) : undefined;
+      // Only update fields that were explicitly provided — never overwrite with undefined
+      const updateData: Record<string, any> = { updatedAt: new Date() };
+      if (firstName   !== undefined) updateData.firstName        = firstName;
+      if (lastName    !== undefined) updateData.lastName         = lastName;
+      if (bio         !== undefined) updateData.bio              = bio;
+      if (city        !== undefined) updateData.city             = city;
+      if (country     !== undefined) updateData.country          = country;
+      if (occupation  !== undefined) updateData.occupation       = occupation;
+      if (education   !== undefined) updateData.education        = education;
+      if (relationshipGoal !== undefined) updateData.relationshipGoal = relationshipGoal;
+      if (aboutMe     !== undefined) updateData.aboutMe          = aboutMe;
+      if (interests   !== undefined) updateData.interests        = JSON.stringify(interests);
 
       const user = await prisma.user.update({
         where: { id: userId },
-        data: { 
-          firstName, 
-          lastName, 
-          bio, 
-          city, 
-          country, 
-          occupation,
-          education,
-          relationshipGoal,
-          aboutMe,
-          interests: interestsJson,
-          updatedAt: new Date() 
-        },
+        data: updateData,
       });
 
       return res.json({
