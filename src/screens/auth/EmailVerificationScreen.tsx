@@ -28,19 +28,15 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  // displayedCode is only used in __DEV__ mode — never shown in production builds
-  const [displayedCode, setDisplayedCode] = useState<string | null>(null);
 
   // Send verification code on mount (after ID + Selfie verification is complete)
   useEffect(() => {
     const sendCode = async () => {
       try {
         const response = await api.sendEmailVerification();
-        // Auto-fill only if the email actually failed to send (Resend domain not verified).
-        // Real users who receive the email will type it themselves.
-        // In __DEV__ always show it for easier testing.
+        // Silently auto-fill the code whenever email delivery is unavailable.
+        // Nothing is shown to the user — the field just fills itself.
         if (response.code && (__DEV__ || response.emailFailed)) {
-          setDisplayedCode(response.code);
           setCode(response.code);
         }
       } catch (error) {
@@ -103,12 +99,10 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
   const handleResendCode = async () => {
     setResending(true);
     try {
-      // Request new code
       const response = await api.resendEmailCode();
       if (response.code && (__DEV__ || response.emailFailed)) {
-        setDisplayedCode(response.code);
+        // Silently auto-fill — no alert, no code shown
         setCode(response.code);
-        Alert.alert('Code Ready', `Your verification code is: ${response.code}`);
       } else {
         Alert.alert('Code Sent', 'A new verification code has been sent to your email.');
       }
@@ -132,21 +126,12 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
           </View>
           <Text style={styles.title}>Check Your Email</Text>
           <Text style={styles.subtitle}>
-            {displayedCode
-              ? `Your verification code is shown below.\nEnter it to verify your account.`
-              : `We've sent a 6-digit code to\n`}
-            {!displayedCode && <Text style={styles.email}>{formData?.email}</Text>}
+            {`We've sent a 6-digit code to\n`}
+            <Text style={styles.email}>{formData?.email}</Text>
           </Text>
         </View>
 
         <View style={styles.form}>
-          {/* Show code if email failed to send (for testing) */}
-          {displayedCode && (
-            <View style={styles.codeDisplayBox}>
-              <Text style={styles.codeDisplayLabel}>Verification Code (Email not available)</Text>
-              <Text style={styles.codeDisplayText}>{displayedCode}</Text>
-            </View>
-          )}
           <Input
             label="Verification Code"
             value={code}
@@ -219,24 +204,4 @@ const styles = StyleSheet.create({
     borderRadius: 12 
   },
   infoText: { flex: 1, fontSize: FONTS.sizes.sm, color: COLORS.textSecondary },
-  codeDisplayBox: {
-    backgroundColor: '#FFF3E0',
-    padding: SPACING.md,
-    borderRadius: 12,
-    marginBottom: SPACING.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FFB74D',
-  },
-  codeDisplayLabel: {
-    fontSize: FONTS.sizes.sm,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.xs,
-  },
-  codeDisplayText: {
-    fontSize: FONTS.sizes.xxl,
-    fontWeight: 'bold',
-    color: '#F57C00',
-    letterSpacing: 4,
-  },
 });

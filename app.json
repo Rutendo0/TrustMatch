@@ -13,7 +13,9 @@
     },
     "updates": {
       "url": "https://u.expo.dev/4445c7cb-0ea3-44b6-b75e-76055cac64bb",
-      "enabled": false
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
     },
     "runtimeVersion": {
       "policy": "appVersion"
