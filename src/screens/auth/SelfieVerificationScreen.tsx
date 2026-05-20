@@ -180,7 +180,6 @@ export const SelfieVerificationScreen: React.FC<SelfieVerificationScreenProps> =
         setFailure({
           reason: 'face_no_match',
           message: 'Your selfie does not match your ID photo.',
-          detail: `Face similarity: ${Math.round(sim * 100)}%. We require at least 50% similarity. Make sure you are the same person shown on your ID and that you have good lighting.`,
         });
         setStep('failed');
         return;

@@ -12,10 +12,18 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://trustmatch-production.up.railway.app/api",
+        "EXPO_PUBLIC_FACE_VERIFICATION_API_URL": "https://mindful-gentleness-production-f2e0.up.railway.app/verify"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://trustmatch-production.up.railway.app/api",
+        "EXPO_PUBLIC_FACE_VERIFICATION_API_URL": "https://mindful-gentleness-production-f2e0.up.railway.app/verify"
+      }
     }
   },
   "submit": {
