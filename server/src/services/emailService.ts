@@ -19,7 +19,7 @@ const FROM_EMAIL = process.env.EMAIL_FROM || 'TrustMatch <noreply@trustmatch.app
 // ── Send verification email ───────────────────────────────────────────────────
 export const sendVerificationEmail = async (
   userId: string
-): Promise<{ success: boolean; message: string; code?: string; emailFailed?: boolean }> => {
+): Promise<{ success: boolean; message: string; code?: string; emailFailed?: boolean; }> => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -141,7 +141,7 @@ export const verifyEmailCode = async (
 // ── Resend code ───────────────────────────────────────────────────────────────
 export const resendVerificationCode = async (
   userId: string
-): Promise<{ success: boolean; message: string; code?: string }> => {
+): Promise<{ success: boolean; message: string; code?: string; emailFailed?: boolean }> => {
   return sendVerificationEmail(userId);
 };
 
