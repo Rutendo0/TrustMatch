@@ -549,8 +549,8 @@ router.post(
         return res.status(400).json({ error: result.message });
       }
       
-      // Return the code in the response so frontend can display it
-      return res.json({ message: result.message, code: result.code });
+      // Return the code in the response so frontend can auto-fill when email is unavailable
+      return res.json({ message: result.message, code: result.code, emailFailed: result.emailFailed ?? false });
     } catch (error) {
       console.error('Send email verification error:', error);
       return res.status(500).json({ error: 'Failed to send verification email' });
@@ -623,7 +623,7 @@ router.post(
         return res.status(400).json({ error: result.message });
       }
       
-      return res.json({ message: result.message, code: result.code });
+      return res.json({ message: result.message, code: result.code, emailFailed: result.emailFailed ?? false });
     } catch (error) {
       console.error('Resend email code error:', error);
       return res.status(500).json({ error: 'Failed to resend verification code' });

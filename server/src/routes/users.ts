@@ -367,6 +367,8 @@ router.get('/discover', verifiedAuthMiddleware, async (req: AuthRequest, res: Re
         age: calculateAge(p.dateOfBirth),
         bio: p.bio,
         aboutMe: p.aboutMe,
+        occupation: p.occupation,
+        education: p.education,
         interests: profileInterests,
         city: p.city,
         photos: p.photos.map((ph) => ph.url),
