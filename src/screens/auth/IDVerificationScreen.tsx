@@ -328,18 +328,34 @@ export const IDVerificationScreen: React.FC<IDVerificationScreenProps> = ({
       }
 
       // Check if the scanned image is actually the front of an ID
+      // Only block if there are clear back-of-ID indicators AND no front-of-ID indicators at all.
+      // OCR is unreliable enough that we should not reject a valid front scan just because
+      // a keyword wasn't picked up — the server-side name/DOB matching will catch bad images.
       const upperText = extractedText.toUpperCase();
       const hasSurname   = /SURNAME|FIRST\s*NAME/.test(upperText);
       const hasIdNumber  = /ID\s*NUMBER|PASSPORT|LICENCE|LICENSE/.test(upperText);
       const hasCountry   = /REPUBLIC|ZIMBABWE|NATIONAL\s*REGISTRATION|NATIONAL\s*ID/.test(upperText);
       const hasDate      = /\d{2}[\/\-]\d{2}[\/\-]\d{4}/.test(upperText);
       const hasAnyIdText = /REGISTRATION|IDENTITY|CITIZEN|BIRTH|GENDER|VILLAGE|HARARE|BULAWAYO/.test(upperText);
-      const looksLikeIdFront = hasSurname || hasIdNumber || hasCountry || (hasDate && hasAnyIdText);
+      const hasName      = /[A-Z]{2,}\s+[A-Z]{2,}/.test(upperText); // at least two capitalised words
+      const hasNumbers   = /\d{4,}/.test(upperText); // any sequence of 4+ digits (ID number, DOB, etc.)
 
-      if (!looksLikeIdFront) {
+      const looksLikeIdFront =
+        hasSurname || hasIdNumber || hasCountry ||
+        (hasDate && hasAnyIdText) ||
+        hasName ||   // two capitalised words is enough — likely a name
+        hasNumbers;  // any long number sequence — likely an ID/DOB
+
+      // Only show the wrong-side warning if the text is genuinely barren
+      // (very short or only barcode/machine-readable zone characters)
+      const isClearlyBackOnly =
+        !looksLikeIdFront &&
+        extractedText.trim().length < 40; // less than ~40 chars = almost nothing readable
+
+      if (isClearlyBackOnly) {
         Alert.alert(
-          'Wrong Side of ID',
-          'It looks like you may have scanned the back of your ID, or the image is not clear enough to read.\n\nPlease scan the FRONT of your ID — the side that shows your name, photo and date of birth.',
+          'Document Not Readable',
+          'We were unable to extract information from your document. For best results:\n\n• Ensure the document is well-lit with no glare\n• Keep the full document within the frame\n• Hold the camera steady until the image is sharp',
           [{ text: 'Try Again', onPress: handleRetryOCR }]
         );
         setIsLoading(false);
